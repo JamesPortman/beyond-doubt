@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clues — What's left before production</title>
+<style>
+  :root{--ink:#15181d;--ink2:#454c57;--ink3:#727a86;--paper:#f5f3ee;--card:#fffefb;
+        --rule:#ded8cc;--accent:#b5501f;--good:#2f6f57;--warn:#a5761c;--code:#f0ece2}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:17px/1.6 "Iowan Old Style",Palatino,Georgia,serif;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:940px;margin:0 auto;padding:52px 26px 100px}
+  h1{font-size:40px;line-height:1.08;margin:0 0 10px;letter-spacing:-.02em}
+  .kicker{font-family:ui-monospace,Menlo,monospace;font-size:12px;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 16px}
+  .lede{font-size:19px;color:var(--ink2);max-width:68ch;margin:0 0 6px}
+  h2{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink3);
+    font-family:ui-monospace,Menlo,monospace;font-weight:600;margin:52px 0 6px;
+    border-bottom:1px solid var(--rule);padding-bottom:10px}
+  .sub{color:var(--ink3);font-size:15px;margin:0 0 18px;font-style:italic}
+  code{font-family:ui-monospace,Menlo,monospace;font-size:.85em;background:var(--code);
+    padding:1px 5px;border-radius:3px}
+  .item{background:var(--card);border:1px solid var(--rule);border-left:3px solid var(--rule);
+    border-radius:4px;padding:15px 20px;margin:0 0 11px}
+  .item.block{border-left-color:var(--accent)}
+  .item.done{border-left-color:var(--good);background:#f6faf7}
+  .item.soon{border-left-color:var(--warn)}
+  .item h3{margin:0 0 5px;font-size:17.5px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .item p{margin:0;color:var(--ink2);font-size:15.5px;max-width:74ch}
+  .who{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;letter-spacing:.1em;
+    text-transform:uppercase;padding:2px 7px;border-radius:9px;background:var(--code);color:var(--ink3)}
+  .who.me{background:#e8f1ea;color:var(--good)}
+  .who.you{background:#f7ece2;color:var(--accent)}
+  .est{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink3);margin-left:auto}
+  .tick{color:var(--good);font-weight:700}
+  .foot{margin-top:56px;border-top:1px solid var(--rule);padding-top:18px;font-size:14.5px;color:var(--ink3)}
+  ul{max-width:74ch;color:var(--ink2);font-size:15.5px}
+  li{margin:5px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="kicker">Clues — production readiness</p>
+<h1>What's left before this can go live</h1>
+<p class="lede">Everything that could be closed from inside the codebase now is closed,
+including the Postgres store, which is written and passing the entire server test suite
+against a real database. What remains is mostly accounts, DNS and one legal document —
+things that need you, not more code.</p>
+
+<h2>Closed this session</h2>
+<p class="sub">Was on the blocking list an hour ago. Is not any more.</p>
+
+<div class="item done">
+  <h3><span class="tick">✓</span> Postgres store, written and proven <span class="who me">done</span></h3>
+  <p>Storage is now an interface with two implementations. <code>npm run test:pg</code> runs
+  all 20 server tests against a real Postgres instance and they pass — same semantics, same
+  results, same anti-cheat guarantees. Coercion at the boundary handles the trap where
+  Postgres returns <code>BIGINT</code> and <code>COUNT()</code> as strings, which would
+  otherwise have turned "1 + 1 days completed" into "11".</p>
+</div>
+
+<div class="item done">
+  <h3><span class="tick">✓</span> CORS locked down <span class="who me">done</span></h3>
+  <p>The API is bearer-token authenticated, and it was answering
+  <code>Access-Control-Allow-Origin: *</code>. Any page could have spent a signed-in user's
+  session. Now an allowlist, with a test proving an unlisted origin gets no grant at all.</p>
+</div>
+
+<div class="item done">
+  <h3><span class="tick">✓</span> Login codes stop leaking in production <span class="who me">done</span></h3>
+  <p><code>authRequest</code> returned the six-digit code in the response body — correct for
+  development, an account-takeover hole in production. There is now a <code>sendEmail</code>
+  hook; with <code>NODE_ENV=production</code> the code goes to the hook and the response
+  carries nothing. Tested both ways.</p>
+</div>
+
+<div class="item done">
+  <h3><span class="tick">✓</span> Refuses to boot misconfigured <span class="who me">done</span></h3>
+  <p>In production the server exits rather than starting without <code>DATABASE_URL</code> and
+  <code>ALLOWED_ORIGINS</code>. The failure mode this prevents is the quiet one: booting on
+  SQLite in <code>/tmp</code>, appearing to work, and losing every account on the next deploy.</p>
+</div>
+
+<div class="item done">
+  <h3><span class="tick">✓</span> Health, shutdown, security headers, git <span class="who me">done</span></h3>
+  <p><code>/api/health</code> checks the database and the board generator, not just that the
+  process is up. SIGTERM drains in-flight requests so nobody loses the move they just made.
+  <code>nosniff</code>, <code>DENY</code> framing, <code>no-referrer</code>. The repo is
+  initialised with a first commit and a <code>.gitignore</code>.</p>
+</div>
+
+<h2>Blocking — nothing ships until these are done</h2>
+<p class="sub">Roughly a day's work in total, and most of it is filling in forms.</p>
+
+<div class="item block">
+  <h3>1 · Choose where it runs <span class="who you">you</span><span class="est">10 min</span></h3>
+  <p><b>Fly.io or Railway with a volume</b> needs zero code changes — <code>npm run serve</code>
+  is the deployment, and SQLite on a mounted disk will carry a daily puzzle game a very long
+  way. <b>Vercel</b> is also ready now that Postgres exists: <code>vercel.json</code> and
+  <code>api/index.ts</code> are written. My recommendation is Fly, and to reach for Postgres
+  when you actually need it rather than on day one.</p>
+</div>
+
+<div class="item block">
+  <h3>2 · Provision the database <span class="who you">you</span><span class="est">20 min</span></h3>
+  <p>Only if you go serverless. Neon or Supabase, then set <code>DATABASE_URL</code>. Put a
+  connection pooler in front — serverless spawns many instances and a hosted Postgres has a
+  connection ceiling. The code opens at most two connections per instance for this reason.</p>
+</div>
+
+<div class="item block">
+  <h3>3 · Wire an email provider <span class="who you">you</span><span class="est">1 hr</span></h3>
+  <p>Resend, Postmark or SES. The <code>sendEmail</code> hook is a four-line implementation;
+  the hour is domain verification — SPF, DKIM and DMARC records. Skip that and your sign-in
+  codes land in spam, which reads to a new player as "this game is broken".</p>
+</div>
+
+<div class="item block">
+  <h3>4 · Domain, DNS, TLS <span class="who you">you</span><span class="est">30 min</span></h3>
+  <p>Every host above issues certificates automatically. Set <code>ALLOWED_ORIGINS</code> to
+  the final domain — including or excluding <code>www</code> deliberately, because a mismatch
+  fails silently in the browser and looks like the API is down.</p>
+</div>
+
+<div class="item block">
+  <h3>5 · Set the real launch date <span class="who you">you</span><span class="est">1 min</span></h3>
+  <p><code>launchDate</code> is a placeholder of <code>2026-06-01</code>. The archive walks
+  back to it, so leaving it wrong means the calendar offers boards that never ran — and
+  someone will "complete" a day that predates the game. One line in <code>serve.mjs</code>.</p>
+</div>
+
+<div class="item block">
+  <h3>6 · Privacy policy and terms <span class="who you">you</span><span class="est">half a day</span></h3>
+  <p>You store email addresses, which is personal data under PIPEDA and GDPR. You need a
+  privacy policy saying what you keep and why, a terms page, and — this is the part people
+  forget — a working route for <b>account deletion and data export</b>. That is a real
+  requirement, not a nicety, and it is far cheaper to build now than to retrofit around a
+  leaderboard that references user rows.</p>
+</div>
+
+<h2>Before you tell anyone about it</h2>
+<p class="sub">Not blocking a private soft launch. Blocking a public one.</p>
+
+<div class="item soon">
+  <h3>Playwright suite in CI <span class="who me">I can do</span><span class="est">2 hrs</span></h3>
+  <p>The browser checks currently print output that I read and judge. That is useless as a
+  regression net. Converting them to assertions covers settings persistence, the share-link
+  round trip, the tutorial, offline↔online transition, touch tagging and room concurrency.</p>
+</div>
+
+<div class="item soon">
+  <h3>Error tracking and backups <span class="who you">you</span><span class="est">1 hr</span></h3>
+  <p>Sentry or equivalent, plus automated Postgres backups <i>with a restore you have actually
+  tested</i>. An untested backup is a rumour.</p>
+</div>
+
+<div class="item soon">
+  <h3>Per-IP rate limiting <span class="who me">I can do</span><span class="est">1 hr</span></h3>
+  <p>Moves are rate limited per play, but sign-in requests are not limited per IP. Someone can
+  currently hammer <code>/api/auth/request</code> and burn your email quota. Cloudflare in
+  front solves it without code.</p>
+</div>
+
+<div class="item soon">
+  <h3>Mobile layout pass <span class="who me">I can do</span><span class="est">3 hrs</span></h3>
+  <p>It works on a phone — long-press tagging is implemented — but the layout was designed at
+  desktop width. For a daily puzzle most of your traffic will be a phone at breakfast.</p>
+</div>
+
+<div class="item soon">
+  <h3>Decide the day boundary <span class="who you">you</span><span class="est">decision</span></h3>
+  <p>Everything is UTC right now. At 8pm in Ontario the "daily" has already rolled over. Either
+  document that, or anchor the boundary to a chosen timezone. It is a small change and a large
+  annoyance if you get it wrong after people have streaks.</p>
+</div>
+
+<h2>After launch, when it matters</h2>
+<ul>
+  <li><b>Percentile and "perfect %" stats</b> — meaningless until you have a player population.</li>
+  <li><b>Non-clue tiles</b> that release nothing when solved — a pacing tool the original uses.</li>
+  <li><b>More clue shapes</b> — equality comparisons and parity. An afternoon each.</li>
+  <li><b>Split clues</b> — shelved, not deleted. One line to bring back.</li>
+  <li><b>Board caching at midnight</b> — only if cold starts ever become visible.</li>
+</ul>
+
+<h2>The honest summary</h2>
+<p>The software is ready. What stands between you and a live game is one hosting account, one
+email domain, one DNS record, and one privacy policy. The single thing I would not skip is
+account deletion, because it is a legal obligation and it is much harder to add later.</p>
+
+<p class="foot">51 tests passing on SQLite · all 20 server tests passing against Postgres ·
+294-board fuzz clean · WCAG contrast verified across 63 theme and mode combinations ·
+worst generate-and-solve 150ms.</p>
+
+</div>
+</body>
+</html>

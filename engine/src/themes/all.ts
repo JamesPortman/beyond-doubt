@@ -1,0 +1,12 @@
+import { registerTheme, Theme } from './index.js';
+import { callboard } from './callboard.js';
+import { wall } from './wall.js';
+import { record } from './record.js';
+import { orchard } from './orchard.js';
+import { plate19 } from './plate19.js';
+import { coldopen } from './coldopen.js';
+import { guestlist } from './guestlist.js';
+
+export const THEMES: Theme[] = [guestlist, orchard, coldopen, callboard, wall, record, plate19];
+for (const t of THEMES) registerTheme(t);
+export { guestlist, callboard, wall, record, orchard, plate19, coldopen };

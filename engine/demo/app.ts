@@ -1,0 +1,1152 @@
+import {
+  allThemes, getTheme, renderContext, renderClue, tagLabel,
+  getLocale, ALL_LOCALES, LocaleCode, Theme,
+  Session, State, bits, PuzzleView, PlacedClue,
+  scoreRun, formatDuration,
+  dailyEdition, weeklyEdition, freeEdition, buildPuzzle, EditionRef, isoDate,
+  LocalLeaderboard, entryFrom, makeRng,
+  Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay,
+  tileArt, ART_DEFS,
+  Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
+  termsForClue, TermId,
+} from '../src/index.js';
+
+type Mode = 'daily' | 'weekly' | 'free' | 'split' | 'room' | 'archive';
+/** 0 = no tag, 1..5 = a colour. The original uses coloured corner tags as working
+ *  notes rather than a two-state pencil, and once you are tracking three hypotheses at
+ *  once two states is not enough. */
+type Pencil = 0 | 1 | 2 | 3 | 4 | 5;
+const TAG_COLOURS = ['transparent', '#e63946', '#f4a300', '#2a9d8f', '#4361ee', '#9d4edd'];
+
+const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
+const el = (tag: string, cls = '', text = '') => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text) n.textContent = text;
+  return n;
+};
+
+const THEME_IDS = allThemes().map((t) => t.id);
+const LOCAL_ID = 'you';
+
+interface Prefs { themeId: string; locale: LocaleCode; mode: Mode; players: number; }
+const DEFAULTS: Prefs = { themeId: 'orchard', locale: 'en', mode: 'daily', players: 1 };
+const loadPrefs = (): Prefs => {
+  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs') ?? '{}') }; }
+  catch { return { ...DEFAULTS }; }
+};
+const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs', JSON.stringify(p)); } catch { /* ignore */ } };
+
+const localBoard = new LocalLeaderboard();
+
+/** Offline only: deterministic rivals so a local board is not an empty table.
+ *  Online, every row is a real result the server verified. */
+function seedRivals(ref: EditionRef) {
+  const rng = makeRng(`rivals|${ref.id}`);
+  const names = ['mira_k', 'joão.p', 'Ana Luísa', 'tomas', 'K. Osei', 'lucia', 'Rui', 'nadia88'];
+  return rng.shuffle(names).slice(0, 6).map((n, i) => {
+    const hints = rng.int(3), mistakes = rng.int(2);
+    const timeMs = Math.round((40 + rng.int(300) + i * 18) * 1000);
+    return entryFrom(ref, `bot:${n}`, n, 'en', timeMs, hints, mistakes,
+      scoreRun({ difficulty: ref.difficulty, elapsedMs: timeMs, hintsUsed: hints, mistakes }), 1);
+  });
+}
+
+class App {
+  prefs = loadPrefs();
+  settings: Settings = loadSettings();
+  inspecting = false;
+  inspectClue: string | null = null;
+  inspectCell: number | null = null;
+  hintArmed = false;
+  shareSeed: string | null = null;
+  tutorialStep = -1;
+  roomId: string | null = null;
+  roomCode: string | null = null;
+  players: RoomPlayer[] = [];
+  focusCell: number | null = null;
+  beat: number | null = null;
+  archiveDays: ArchiveDay[] = [];
+  archiveOpen = false;
+  archiveDate: string | null = null;
+  doneClues = new Set<string>();
+  api = new Api(defaultApiBase());
+  online = false;
+
+  theme!: Theme;
+  session!: Session;
+  /** online */
+  playId: string | null = null;
+  edition!: EditionInfo;
+  /** offline */
+  localRef!: EditionRef;
+
+  pencils: Pencil[] = [];
+  activePlayer = 0;
+  brush: State = 1;
+  highlight = 0;
+  busy = false;
+  serverElapsed = 0;
+  previousResult: RunResult | null = null;
+  startedWall = 0;
+  hintsUsed = 0;
+  mistakes = 0;
+  tick: number | null = null;
+
+  get loc() { return getLocale(this.prefs.locale); }
+  get ui() { return this.loc.ui; }
+  get strings() { return this.theme.strings[this.prefs.locale]; }
+  get playerCount() { return this.prefs.mode === 'split' ? Math.max(2, this.prefs.players) : 1; }
+  get todayIndex() { const d = new Date(); return (d.getUTCDay() || 7) - 1; }
+
+  /** A shared link carries a theme and, for practice boards, a seed. Boards are pure
+   *  functions of their seed, so this reproduces the exact scenario with no server. */
+  private linked: { seed?: string; difficulty?: number } | null = null;
+
+  private readLink() {
+    try {
+      const q = new URLSearchParams(globalThis.location?.search ?? '');
+      const g = q.get('g');
+      if (g && allThemes().some((t) => t.id === g)) this.prefs.themeId = g;
+      const m = q.get('m');
+      if (m === 'daily' || m === 'weekly' || m === 'free' || m === 'split') this.prefs.mode = m;
+      const room = q.get('room');
+      if (room) { this.roomCode = room.toUpperCase(); this.prefs.mode = 'room'; }
+      const seed = q.get('s');
+      if (seed) {
+        this.linked = { seed, difficulty: Number(q.get('d')) || 4 };
+        this.prefs.mode = 'free';
+      }
+    } catch { /* no location, no link */ }
+  }
+
+  async start() {
+    document.body.insertAdjacentHTML('afterbegin', ART_DEFS);
+    this.readLink();
+    this.theme = getTheme(this.prefs.themeId);
+    this.applySkin();
+    await this.probe();
+    this.buildChrome();
+    await this.newBoard();
+    document.addEventListener('keydown', (e) => {
+      if (e.key === '1') { this.brush = 0; this.render(); }
+      if (e.key === '2') { this.brush = 1; this.render(); }
+      if (e.key.toLowerCase() === 'h') void this.doHint();
+    });
+  }
+
+  /** Online if a server is reachable AND we have a valid token. Split mode is a
+   *  one-device format, so it always runs locally. */
+  async probe() {
+    const up = await this.api.reachable();
+    const me = up ? await this.api.me() : null;
+    this.online = !!(up && me);
+  }
+
+  /* ---------------- board lifecycle ---------------- */
+
+  async newBoard(dayIndex?: number) {
+    this.theme = getTheme(this.prefs.themeId);
+    this.busy = true;
+    this.hintsUsed = 0; this.mistakes = 0; this.serverElapsed = 0;
+    this.playId = null; this.previousResult = null;
+    this.activePlayer = 0; this.highlight = 0;
+
+    if (this.beat) { clearInterval(this.beat); this.beat = null; }
+    if (this.prefs.mode !== 'room') { this.roomId = null; this.roomCode = null; this.players = []; }
+
+    if (this.prefs.mode === 'archive' && !this.archiveDate) {
+      this.archiveOpen = true;
+      await this.loadArchive();
+      this.busy = false;
+      this.applySkin();
+      this.render();
+      return;
+    }
+
+    if (this.prefs.mode === 'room') {
+      if (!this.online) { this.toast(this.ui.room.codeHint, 'warn'); this.prefs.mode = 'daily'; }
+      else {
+        try {
+          const res = await this.api.roomJoin(
+            this.roomCode ? { code: this.roomCode } : { mode: 'daily', themeId: this.prefs.themeId },
+          );
+          this.roomId = res.roomId; this.roomCode = res.code; this.players = res.players;
+          this.playId = res.playId; this.edition = res.edition;
+          this.session = new Session({ puzzle: res.view, hintBudget: res.hintBudget, now: () => 0 });
+          this.prefs.themeId = res.edition.themeId;
+          this.theme = getTheme(this.prefs.themeId);
+          // presence is a poll, not a socket: one small request every few seconds is
+          // enough for a race and survives sleeping laptops and flaky wifi
+          this.beat = setInterval(() => void this.heartbeat(), 2500) as unknown as number;
+        } catch (e) {
+          this.toast(`${(e as ApiError).code ?? 'offline'}`, 'warn');
+          this.prefs.mode = 'daily';
+        }
+      }
+    }
+
+    const useServer = this.online && !this.playId && this.prefs.mode !== 'split'
+      && this.prefs.mode !== 'room' && !this.linked;
+    if (useServer) {
+      try {
+        const mode = this.prefs.mode as PlayMode;
+        const res = await this.api.start({
+          mode, themeId: this.prefs.themeId,
+          dayIndex: mode === 'weekly' ? (dayIndex ?? this.todayIndex) : undefined,
+          date: mode === 'archive' ? this.archiveDate ?? undefined : undefined,
+        });
+        this.playId = res.playId;
+        this.edition = res.edition;
+        this.session = new Session({ puzzle: res.view, hintBudget: res.hintBudget, now: () => 0 });
+        this.previousResult = res.previousResult;
+        this.shareSeed = res.shareSeed ?? null;
+        if (res.previousResult) this.toast(this.replayNotice(res.previousResult), 'warn');
+      } catch (e) {
+        this.online = false;
+        this.toast(`${(e as ApiError).code ?? 'offline'}`, 'warn');
+      }
+    }
+    if (!this.playId) this.startLocal(dayIndex);
+
+    this.pencils = new Array(this.session.puzzle.n).fill(0);
+    this.doneClues.clear();
+    this.inspectClue = null; this.inspectCell = null;
+    this.startedWall = Date.now();
+    if (this.tick) clearInterval(this.tick);
+    this.tick = setInterval(() => this.paintStatus(), 500) as unknown as number;
+    this.busy = false;
+    this.applySkin();
+    this.render();
+  }
+
+  private startLocal(dayIndex?: number) {
+    const today = new Date();
+    let ref: EditionRef;
+    if (this.prefs.mode === 'weekly') {
+      ref = weeklyEdition(THEME_IDS, today, this.prefs.themeId)[Math.min(dayIndex ?? this.todayIndex, this.todayIndex)];
+    } else if (this.prefs.mode === 'archive' && this.archiveDate) {
+      ref = dailyEdition(THEME_IDS, new Date(`${this.archiveDate}T12:00:00Z`), this.prefs.themeId);
+    } else if (this.prefs.mode === 'daily' || this.prefs.mode === 'split') {
+      ref = dailyEdition(THEME_IDS, today, this.prefs.themeId);
+    } else if (this.linked) {
+      ref = freeEdition(this.prefs.themeId, this.linked.difficulty ?? 4, this.linked.seed!);
+      this.linked = null;   // only the first board comes from the link
+    } else {
+      ref = freeEdition(this.prefs.themeId, 4, `free|${this.prefs.themeId}|${Math.floor(Math.random() * 1e9)}`);
+    }
+    this.localRef = ref;
+    this.shareSeed = ref.kind === 'free' ? ref.seed : null;
+    this.edition = {
+      id: ref.id, kind: ref.kind === 'weekly' ? 'weekly' : ref.kind === 'daily' ? 'daily' : 'free',
+      themeId: ref.themeId, difficulty: ref.difficulty, date: ref.date,
+      weekId: ref.weekId, dayIndex: ref.dayIndex, ranked: false,
+    };
+    const puzzle = buildPuzzle(ref, this.theme);
+    this.session = new Session({
+      puzzle,
+      players: this.prefs.mode === 'split' ? this.playerCount : 1,
+      hintBudget: 3,
+    });
+    for (const r of seedRivals(ref)) void localBoard.submit(r);
+  }
+
+  applySkin() {
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(cssVars(this.theme, this.settings))) root.style.setProperty(k, v);
+    document.body.className = this.theme.skinClass;
+    document.body.dataset.colorMode = this.settings.colorMode;
+    document.body.dataset.motion = this.settings.reduceMotion ? 'reduced' : 'normal';
+    document.documentElement.lang = this.loc.bcp47;
+  }
+
+  /* ---------------- chrome ---------------- */
+
+  buildChrome() {
+    const gameSel = $('#game') as HTMLSelectElement;
+    gameSel.innerHTML = '';
+    for (const t of allThemes()) {
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = t.strings[this.prefs.locale].title;
+      gameSel.appendChild(o);
+    }
+    gameSel.value = this.prefs.themeId;
+    gameSel.onchange = () => { this.prefs.themeId = gameSel.value; savePrefs(this.prefs); void this.newBoard(); };
+
+    const langSel = $('#lang') as HTMLSelectElement;
+    langSel.innerHTML = '';
+    for (const code of ALL_LOCALES) {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = { en: 'English', pt: 'Português', es: 'Español' }[code];
+      langSel.appendChild(o);
+    }
+    langSel.value = this.prefs.locale;
+    langSel.onchange = () => {
+      this.prefs.locale = langSel.value as LocaleCode;
+      savePrefs(this.prefs);
+      this.buildChrome();      // language is a pure re-render — same board, same progress
+      this.render();
+    };
+
+    // Split clues is shelved, not deleted: Session.cluesFor(player) and dealClues() are
+    // still in the engine and still tested. Putting the tab back is one line.
+    this.paintModes();
+
+    $('#newBtn').onclick = () => void this.newBoard();
+    this.paintAccount();
+  }
+
+  paintAccount() {
+    const wrap = $('#account');
+    wrap.innerHTML = '';
+    const dot = el('span', 'dot ' + (this.online ? 'up' : 'down'));
+    wrap.appendChild(dot);
+    if (this.online && this.api.user) {
+      wrap.appendChild(el('span', 'who', this.api.user.displayName));
+      const out = el('button', 'link', 'Sign out');
+      out.onclick = () => { this.api.signOut(); this.online = false; this.buildChrome(); void this.newBoard(); };
+      wrap.appendChild(out);
+    } else {
+      wrap.appendChild(el('span', 'who', 'Local play'));
+      const inb = el('button', 'link', 'Sign in');
+      inb.onclick = () => this.signInFlow();
+      wrap.appendChild(inb);
+    }
+  }
+
+  signInFlow() {
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'result signin');
+    card.appendChild(el('h2', '', 'Sign in'));
+    card.appendChild(el('p', 'big', 'Ranked scores need an account. Everything else works without one.'));
+    const email = document.createElement('input');
+    email.type = 'email'; email.placeholder = 'you@example.com'; email.className = 'field';
+    const name = document.createElement('input');
+    name.type = 'text'; name.placeholder = 'Display name'; name.className = 'field';
+    const code = document.createElement('input');
+    code.type = 'text'; code.placeholder = '6-digit code'; code.className = 'field'; code.style.display = 'none';
+    const note = el('p', 'streak', '');
+    const go = el('button', 'primary', 'Send code');
+    const cancel = el('button', '', 'Cancel');
+    let stage: 'email' | 'code' = 'email';
+
+    go.onclick = async () => {
+      try {
+        if (stage === 'email') {
+          const r = await this.api.requestCode(email.value.trim());
+          stage = 'code';
+          code.style.display = '';
+          go.textContent = 'Verify';
+          note.textContent = r.devCode ? `Dev mode — your code is ${r.devCode}` : 'Check your email.';
+          if (r.devCode) code.value = r.devCode;
+        } else {
+          await this.api.verify(email.value.trim(), code.value.trim(), name.value.trim() || undefined);
+          this.online = true;
+          ov.classList.remove('on');
+          this.buildChrome();
+          await this.newBoard();
+        }
+      } catch (e) {
+        note.textContent = `Could not sign in (${(e as ApiError).code ?? 'no server'}). Start it with: npm run serve`;
+      }
+    };
+    cancel.onclick = () => ov.classList.remove('on');
+    for (const n of [email, name, code, note, go, cancel]) card.appendChild(n);
+    ov.appendChild(card);
+    ov.classList.add('on');
+    email.focus();
+  }
+
+  replayNotice(r: RunResult) {
+    return `${this.ui.solved} — ${formatDuration(r.timeMs)} · ${r.score}. ${this.ui.complete}.`;
+  }
+
+  /* ---------------- rendering ---------------- */
+
+  render() {
+    $('#title').textContent = this.strings.title;
+    $('#tagline').textContent = this.strings.tagline;
+    $('#newBtn').textContent = this.ui.newGame;
+    ($('#game') as HTMLSelectElement).value = this.prefs.themeId;
+    this.paintModes();
+    // "ranked" is about THIS run, not the edition: a board you have already completed
+    // can be replayed, but the result will not be re-ranked.
+    $('#ranked').textContent = !this.online ? '○ local'
+      : this.previousResult ? '✓ ' + this.ui.complete
+      : this.edition.ranked ? '● ranked' : '○ practice';
+    this.buildBrush();
+    this.paintBoard();
+    this.paintClues();
+    this.paintStatus();
+    this.paintWeek();
+    this.paintPlayers();
+    this.paintArchive();
+    this.paintRoom();
+    this.paintActions();
+    this.paintInspect();
+    void this.paintLeaderboard();
+  }
+
+  buildBrush() {
+    const wrap = $('#brush');
+    wrap.innerHTML = '';
+    wrap.appendChild(el('span', 'brush-label', this.ui.markAs));
+    ([0, 1] as State[]).forEach((s) => {
+      const st = s === 1 ? this.strings.states.b : this.strings.states.a;
+      const b = el('button', `chip s${s}` + (this.brush === s ? ' on' : ''), st.name);
+      b.onclick = () => { this.brush = s; this.render(); };
+      wrap.appendChild(b);
+    });
+  }
+
+  paintBoard() {
+    const p = this.session.puzzle;
+    const ctx = renderContext(this.theme, this.prefs.locale, p);
+    const board = $('#board');
+    board.innerHTML = '';
+    board.style.gridTemplateColumns = `repeat(${p.w}, 1fr)`;
+    const d = this.session.deduction();
+    const forced = d.forcedA | d.forcedB;
+    const tagKey = Object.keys(this.theme.tagSchema)[0];
+
+    for (let i = 0; i < p.n; i++) {
+      const knownB = (this.session.knownB >> i) & 1;
+      const knownA = (this.session.knownA >> i) & 1;
+      const known = knownB || knownA;
+      const cell = el('button', 'cell');
+      cell.classList.toggle('known', !!known);
+      cell.classList.toggle('is-a', !!knownA);
+      cell.classList.toggle('is-b', !!knownB);
+      cell.classList.toggle('forced', !known && !!((forced >> i) & 1));
+      cell.classList.toggle('lit', !!((this.highlight >> i) & 1));
+      cell.classList.toggle('dimmed', this.inspecting && this.highlight !== 0 && !((this.highlight >> i) & 1));
+      if (this.pencils[i] && !known) {
+        const tag = el('span', 'tile-tag');
+        tag.style.background = TAG_COLOURS[this.pencils[i]];
+        cell.appendChild(tag);
+      }
+      if (this.settings.tileArt) {
+        const art = el('span', 'art');
+        art.innerHTML = tileArt({
+          theme: this.theme, index: i, labelSeed: p.labelSeed,
+          tag: tagKey ? p.tags[i][tagKey] : undefined,
+          state: known ? (knownB ? 1 : 0) : null,
+        });
+        cell.appendChild(art);
+      } else {
+        cell.classList.add('no-art');
+      }
+
+      const cap = el('span', 'cap');
+      cap.appendChild(el('span', 'cell-name', ctx.labels[i].text));
+      if (tagKey) cap.appendChild(el('span', 'cell-tag', tagLabel(this.theme, this.prefs.locale, tagKey, p.tags[i][tagKey])));
+      cell.appendChild(cap);
+      if (known) {
+        const st = knownB ? this.strings.states.b : this.strings.states.a;
+        cell.appendChild(el('span', 'cell-state', st.name));
+      }
+      cell.onclick = () => {
+        this.focusCell = i;
+        if (this.inspecting) { this.inspectCell = i; this.inspectClue = null; this.render(); return; }
+        void this.flip(i);
+      };
+      cell.onmouseenter = () => { if (this.roomId) this.focusCell = i; };
+      let held: number | null = null;
+      cell.addEventListener('touchstart', () => {
+        held = setTimeout(() => {
+          held = null;
+          if (!known) { this.pencils[i] = ((this.pencils[i] + 1) % TAG_COLOURS.length) as Pencil; this.render(); }
+        }, 450) as unknown as number;
+      }, { passive: true });
+      const cancelHold = () => { if (held !== null) { clearTimeout(held); held = null; } };
+      cell.addEventListener('touchend', cancelHold);
+      cell.addEventListener('touchmove', cancelHold);
+      cell.oncontextmenu = (e) => {
+        e.preventDefault();
+        if (!known) { this.pencils[i] = ((this.pencils[i] + 1) % TAG_COLOURS.length) as Pencil; this.render(); }
+      };
+      // where everyone else is looking, right now
+      const here = this.players.filter((pl) => !pl.you && pl.focusCell === i && pl.idleSeconds <= 30);
+      if (here.length) {
+        const marks = el('span', 'player-marks');
+        for (const pl of here) {
+          const idx = this.players.findIndex((q) => q.userId === pl.userId);
+          const m = el('i', '', pl.displayName.slice(0, 1).toUpperCase());
+          m.style.background = playerColour(idx);
+          m.title = `${pl.displayName} — ${this.ui.room.looking}`;
+          marks.appendChild(m);
+        }
+        cell.appendChild(marks);
+      }
+      board.appendChild(cell);
+    }
+  }
+
+  paintClues() {
+    const p = this.session.puzzle;
+    const ctx = renderContext(this.theme, this.prefs.locale, p);
+    const list = $('#clues');
+    list.innerHTML = '';
+    const visible = this.prefs.mode === 'split' && !this.online
+      ? this.session.cluesFor(this.activePlayer)
+      : this.session.activeClues();
+    const section = (heading: string, items: PlacedClue[]) => {
+      if (!items.length) return;
+      list.appendChild(el('h3', 'clue-head', heading));
+      for (const pc of items) {
+        const isDone = this.doneClues.has(pc.id);
+        if (isDone && this.settings.usedClues === 'hide' && !this.session.solved) continue;
+        const row = el('div', 'clue' + (isDone && this.settings.usedClues === 'dim' ? ' done' : '')
+          + (this.inspectClue === pc.id ? ' picked' : ''));
+        row.appendChild(el('p', 'clue-text', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
+        if (pc.gate !== null) row.appendChild(el('span', 'clue-src', `${this.ui.unlockedBy} ${ctx.labels[pc.gate].text}`));
+        row.onmouseenter = () => { if (!this.inspecting) { this.highlight = maskOf(this.session.touches(pc.clue)); this.paintBoard(); } };
+        row.onmouseleave = () => { if (!this.inspecting) { this.highlight = 0; this.paintBoard(); } };
+        row.onclick = () => {
+          if (this.inspecting) {
+            this.inspectClue = pc.id; this.inspectCell = null;
+            this.highlight = maskOf(this.session.touches(pc.clue));
+            this.render();
+            return;
+          }
+          if (isDone) this.doneClues.delete(pc.id); else this.doneClues.add(pc.id);
+          this.paintClues();
+        };
+        list.appendChild(row);
+      }
+    };
+    section(this.ui.openingClues, visible.filter((c) => c.gate === null));
+    section(this.ui.clues, visible.filter((c) => c.gate !== null));
+  }
+
+  paintPlayers() {
+    const wrap = $('#players');
+    wrap.innerHTML = '';
+    if (this.prefs.mode !== 'split') { wrap.style.display = 'none'; return; }
+    wrap.style.display = '';
+    const count = el('div', 'player-count');
+    [2, 3, 4].forEach((n) => {
+      const b = el('button', 'chip' + (this.playerCount === n ? ' on' : ''), `${n}`);
+      b.onclick = () => { this.prefs.players = n; savePrefs(this.prefs); void this.newBoard(); };
+      count.appendChild(b);
+    });
+    wrap.appendChild(count);
+    for (let i = 0; i < this.playerCount; i++) {
+      const b = el('button', 'tab' + (this.activePlayer === i ? ' on' : ''), `${this.ui.playerN} ${i + 1}`);
+      b.onclick = () => { this.activePlayer = i; this.render(); };
+      wrap.appendChild(b);
+    }
+    wrap.appendChild(el('p', 'hint-note', this.ui.yourClues));
+  }
+
+  paintWeek() {
+    const strip = $('#week');
+    strip.innerHTML = '';
+    if (this.prefs.mode !== 'weekly') { strip.style.display = 'none'; return; }
+    strip.style.display = '';
+    const week = weeklyEdition(THEME_IDS, new Date(), this.prefs.themeId);
+    week.forEach((ref, i) => {
+      const b = el('button', 'day' + (i === (this.edition.dayIndex ?? this.todayIndex) ? ' on' : ''));
+      b.appendChild(el('span', 'day-name', this.ui.days[i].slice(0, 3)));
+      b.appendChild(el('span', 'day-diff', '●'.repeat(Math.min(3, Math.ceil(ref.difficulty / 2.4)))));
+      if (i > this.todayIndex) { b.classList.add('locked'); (b as HTMLButtonElement).disabled = true; }
+      else b.onclick = () => void this.newBoard(i);
+      strip.appendChild(b);
+    });
+  }
+
+  paintStatus() {
+    const s = this.session.snapshot();
+    const ms = this.online ? (this.serverElapsed || Date.now() - this.startedWall) : s.elapsedMs;
+    const showTime = this.settings.showTimer === 'always'
+      || (this.settings.showTimer === 'onSolve' && this.session.solved);
+    $('#time').textContent = showTime ? formatDuration(ms) : '—';
+    $('#timeL').textContent = this.ui.timeLabel;
+    $('#mist').textContent = String(this.online ? this.mistakes : s.mistakes);
+    $('#mistL').textContent = this.ui.mistakes;
+    $('#hints').textContent = String(this.online ? this.hintsUsed : s.hintsUsed);
+    $('#hintsL').textContent = this.ui.hintsUsed;
+    $('#prog').textContent = `${s.revealed}/${s.total}`;
+    $('#diff').textContent = `${this.ui.difficulty} ${this.edition.difficulty}/7`;
+  }
+
+  async paintLeaderboard() {
+    const browsing = this.prefs.mode === 'archive' && this.archiveOpen;
+    const show = !browsing && (this.settings.showLeaderboard === 'always'
+      || (this.settings.showLeaderboard === 'onSolve' && this.session.solved));
+    ($('#lbpanel') as HTMLElement).style.display = show ? '' : 'none';
+    ($('#wkpanel') as HTMLElement).style.display = show ? '' : 'none';
+    if (!show) return;
+    $('#lbhead').textContent = this.ui.leaderboard;
+    $('#wkhead').textContent = this.ui.thisWeek;
+    const box = $('#lbrows'), wbox = $('#wkrows');
+    box.innerHTML = ''; wbox.innerHTML = '';
+    try {
+      const rows = this.online
+        ? (await this.api.board(this.edition.id)).entries
+        : await localBoard.top(this.edition.id, 8);
+      const meId = this.online ? this.api.user?.id : LOCAL_ID;
+      if (!rows.length) box.appendChild(el('p', 'empty', this.ui.noEntries));
+      rows.slice(0, 8).forEach((r, i) => {
+        const row = el('div', 'lbrow' + (r.playerId === meId ? ' me' : ''));
+        row.appendChild(el('span', 'lbrank', String(i + 1)));
+        row.appendChild(el('span', 'lbname', r.playerId === meId ? this.ui.you : r.displayName));
+        row.appendChild(el('span', 'lbtime', formatDuration(r.timeMs)));
+        row.appendChild(el('span', 'lbscore', String(r.score)));
+        row.appendChild(el('span', 'lbperfect', r.perfect ? '★' : ''));
+        box.appendChild(row);
+      });
+      const wid = this.edition.weekId ?? '';
+      const wk = this.online ? (await this.api.week(wid)).standings : await localBoard.weekly(wid, 5);
+      if (!wk.length) wbox.appendChild(el('p', 'empty', this.ui.noEntries));
+      for (const w of wk.slice(0, 6)) {
+        const row = el('div', 'lbrow wkrow' + (w.playerId === meId ? ' me' : ''));
+        row.appendChild(el('span', 'lbname', w.playerId === meId ? this.ui.you : w.displayName));
+        row.appendChild(el('span', 'lbtime', `${w.daysCompleted}/7`));
+        row.appendChild(el('span', 'lbscore', String(w.totalScore)));
+        wbox.appendChild(row);
+      }
+    } catch {
+      box.appendChild(el('p', 'empty', this.ui.noEntries));
+    }
+  }
+
+  /* ---------------- interaction ---------------- */
+
+  async flip(i: number) {
+    if (this.busy) return;
+    // Deduce locally for instant feedback — the client can prove which cells are legal
+    // from the clues it holds. The server still re-checks every move.
+    const r = this.session.mark(i, this.brush);
+    if (r.outcome === 'not-deducible') { this.toast(this.ui.notDeducible, 'warn'); this.shake(i); return; }
+
+    if (this.online && this.playId) {
+      this.busy = true;
+      try {
+        const ack = await this.api.move({ playId: this.playId, cell: i, state: this.brush });
+        this.mistakes = ack.mistakes;
+        this.hintsUsed = ack.hintsUsed;
+        this.serverElapsed = ack.elapsedMs;
+        if (ack.outcome === 'ok') this.session.addClues(ack.unlocked);
+        if (ack.outcome !== r.outcome) { await this.newBoard(); return; }   // desync: refetch
+        if (ack.result) { this.render(); this.showResult(ack.result); this.busy = false; return; }
+      } catch (e) {
+        const code = (e as ApiError).code;
+        if (code === 'too-fast') { this.toast('Slow down a touch', 'warn'); }
+        else { this.online = false; this.paintAccount(); this.toast('Lost the server — continuing locally', 'warn'); }
+      } finally { this.busy = false; }
+    }
+
+    if (r.outcome === 'wrong') { this.toast(this.ui.illegalMove, 'bad'); this.shake(i); this.render(); return; }
+    if (this.settings.autoClearPencil) this.pencils[i] = 0;
+    if (this.session.solved && this.settings.undimAtEnd) this.doneClues.clear();
+    this.render();
+    if (r.solved && !this.online) void this.finishLocal();
+  }
+
+  async doHint() {
+    if (this.settings.hintButton === 'disabled') return;
+    if (this.settings.hintButton === 'confirm' && !this.hintArmed) {
+      this.hintArmed = true;
+      this.toast(this.ui.hint + '?', 'warn');
+      setTimeout(() => { this.hintArmed = false; }, 4000);
+      return;
+    }
+    this.hintArmed = false;
+    if (this.online && this.playId) {
+      try {
+        const h = await this.api.hint(this.playId);
+        this.hintsUsed = h.hintsUsed;
+        this.applyHint(h.hint);
+        return;
+      } catch { /* fall through to local */ }
+    }
+    this.applyHint(this.session.hint());
+  }
+
+  private applyHint(h: { kind: string; clueId?: string; cell?: number }) {
+    if (h.kind === 'none') { this.toast(this.ui.noHints, 'warn'); return; }
+    if (h.kind === 'clue' && h.clueId) {
+      const pc = this.session.puzzle.clues.find((c) => c.id === h.clueId);
+      if (pc) this.highlight = maskOf(this.session.touches(pc.clue));
+      this.toast(this.ui.hintClue, 'good');
+    } else if (h.kind === 'cell' && h.cell !== undefined) {
+      this.highlight = 1 << h.cell;
+      this.toast(this.ui.hintCell, 'good');
+    }
+    this.render();
+  }
+
+  async finishLocal() {
+    const s = this.session.snapshot();
+    const res = scoreRun({
+      difficulty: this.edition.difficulty, elapsedMs: s.elapsedMs,
+      hintsUsed: s.hintsUsed, mistakes: s.mistakes,
+    });
+    await localBoard.submit(entryFrom(this.localRef, LOCAL_ID, 'You', this.prefs.locale,
+      s.elapsedMs, s.hintsUsed, s.mistakes, res));
+    const dates: string[] = [];
+    for (let i = 0; i < 30; i++) dates.push(isoDate(new Date(Date.now() - i * 86400000)));
+    this.showResult({
+      editionId: this.edition.id, timeMs: s.elapsedMs, hintsUsed: s.hintsUsed,
+      mistakes: s.mistakes, score: res.score, perfect: res.perfect,
+      ranked: false, rank: null, streak: await localBoard.streak(LOCAL_ID, dates),
+    });
+  }
+
+  showResult(r: RunResult) {
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'result');
+    card.appendChild(el('h2', '', this.ui.solved));
+    card.appendChild(el('p', 'big', `${this.ui.solvedIn} ${formatDuration(r.timeMs)}`));
+    card.appendChild(el('p', 'score', `${this.ui.scoreLabel} ${r.score}`));
+    if (r.rank) card.appendChild(el('p', 'perfect', `${this.ui.rank} ${r.rank}`));
+    if (r.perfect) card.appendChild(el('p', 'perfect', this.ui.perfect));
+    if (!r.ranked) card.appendChild(el('p', 'streak', this.online ? 'Practice run — not ranked' : 'Local run — sign in for ranked play'));
+    card.appendChild(el('p', 'streak', `${this.ui.streak} ${r.streak}`));
+    const share = el('button', 'primary', this.ui.share);
+    share.onclick = () => {
+      const txt = `${this.strings.title} ${this.edition.date ?? ''} — ${formatDuration(r.timeMs)} · ${r.score}${r.perfect ? ' ★' : ''}`;
+      void navigator.clipboard?.writeText(txt);
+      share.textContent = this.ui.copied;
+    };
+    const again = el('button', '', this.ui.newGame);
+    again.onclick = () => { ov.classList.remove('on'); void this.newBoard(); };
+    card.appendChild(share); card.appendChild(again);
+    ov.appendChild(card);
+    ov.classList.add('on');
+    void this.paintLeaderboard();
+  }
+
+
+
+
+
+  paintModes() {
+    const modes: [Mode, string][] = [
+      ['daily', this.ui.daily], ['archive', this.ui.archive.title], ['weekly', this.ui.weekly],
+      ['free', this.ui.newGame], ['room', this.ui.room.title],
+    ];
+    const bar = $('#modes');
+    bar.innerHTML = '';
+    for (const [m, label] of modes) {
+      const b = el('button', 'tab' + (this.prefs.mode === m ? ' on' : ''), label);
+      b.onclick = () => {
+        this.prefs.mode = m;
+        if (m === 'archive') { this.archiveDate = null; this.archiveOpen = true; }
+        savePrefs(this.prefs);
+        void this.newBoard();
+      };
+      bar.appendChild(b);
+    }
+  }
+
+  /* ---------------- archive ---------------- */
+
+  /** Online the archive is authoritative and knows what you have played. Offline it is
+   *  still browsable, because every past board is a pure function of its date. */
+  async loadArchive() {
+    if (this.online) {
+      try {
+        const res = await this.api.archive({ themeId: this.prefs.themeId, days: 63 });
+        this.archiveDays = res.days;
+        return;
+      } catch { /* fall through to the local listing */ }
+    }
+    const today = new Date();
+    const launch = new Date(Date.UTC(2026, 5, 1));
+    const days: ArchiveDay[] = [];
+    for (let i = 0; i < 63; i++) {
+      const d = new Date(today.getTime() - i * 86400000);
+      if (d < launch) break;
+      const ref = dailyEdition(THEME_IDS, d, this.prefs.themeId);
+      const mine = await localBoard.best(ref.id, LOCAL_ID);
+      days.push({
+        date: ref.date!, editionId: ref.id, themeId: this.prefs.themeId,
+        difficulty: ref.difficulty, weekday: (d.getUTCDay() || 7) - 1,
+        played: !!mine, score: mine?.score ?? null, timeMs: mine?.timeMs ?? null,
+        perfect: !!mine?.perfect, late: false,
+      });
+    }
+    this.archiveDays = days;
+  }
+
+  paintArchive() {
+    const host = $('#archive');
+    const main = $('#playarea');
+    const showing = this.prefs.mode === 'archive' && this.archiveOpen;
+    host.style.display = showing ? '' : 'none';
+    main.style.display = showing ? 'none' : '';
+    ($('#cluepanel') as HTMLElement).style.display = showing ? 'none' : '';
+    if (!showing) return;
+
+    const A = this.ui.archive;
+    host.innerHTML = '';
+    host.appendChild(el('h2', 'arch-title', A.title));
+    host.appendChild(el('p', 'arch-sub', A.subtitle));
+    if (!this.archiveDays.length) { host.appendChild(el('p', 'empty', A.loading)); return; }
+
+    const done = this.archiveDays.filter((d) => d.played).length;
+    host.appendChild(el('p', 'arch-count', `${done} ${A.completed} ${A.of} ${this.archiveDays.length}`));
+
+    const months = new Map<string, ArchiveDay[]>();
+    for (const d of this.archiveDays) {
+      const key = d.date.slice(0, 7);
+      (months.get(key) ?? months.set(key, []).get(key)!).push(d);
+    }
+    const fmt = new Intl.DateTimeFormat(this.loc.bcp47, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    const todayIso = this.archiveDays[0].date;
+
+    for (const [key, list] of months) {
+      host.appendChild(el('h3', 'arch-month', fmt.format(new Date(`${key}-15T12:00:00Z`))));
+      const grid = el('div', 'arch-grid');
+      // calendar order, Monday first
+      const sorted = list.slice().sort((a, b) => a.date.localeCompare(b.date));
+      for (let i = 0; i < sorted[0].weekday; i++) grid.appendChild(el('span', 'arch-pad'));
+      for (const d of sorted) {
+        const cell = el('button', 'arch-day' + (d.played ? ' done' : '') + (d.date === todayIso ? ' today' : ''));
+        cell.appendChild(el('span', 'arch-num', String(Number(d.date.slice(8)))));
+        const pips = el('span', 'arch-pips');
+        for (let k = 0; k < Math.min(3, Math.ceil(d.difficulty / 2.4)); k++) pips.appendChild(el('i'));
+        cell.appendChild(pips);
+        if (d.played) cell.appendChild(el('span', 'arch-score', d.perfect ? '\u2605' : String(d.score ?? '')));
+        cell.title = `${d.date} · ${this.ui.difficulty} ${d.difficulty}/7` + (d.played ? ` · ${d.score}` : '');
+        cell.onclick = () => { this.archiveDate = d.date; this.archiveOpen = false; void this.newBoard(); };
+        grid.appendChild(cell);
+      }
+      host.appendChild(grid);
+    }
+  }
+
+  /* ---------------- room presence ---------------- */
+
+  async heartbeat() {
+    if (!this.roomId) return;
+    try {
+      const r = await this.api.roomHeartbeat(this.roomId, this.focusCell);
+      this.players = r.players;
+      this.paintRoom();
+      this.paintBoard();
+    } catch { /* a dropped beat is not worth interrupting play for */ }
+  }
+
+  paintRoom() {
+    const panel = $('#room');
+    panel.innerHTML = '';
+    if (this.prefs.mode !== 'room' || !this.roomId) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    const R = this.ui.room;
+    panel.appendChild(el('h2', 'panel-head', `${R.title} · ${this.roomCode}`));
+
+    const invite = el('button', 'link', R.copyInvite);
+    invite.onclick = () => {
+      const base = (globalThis.location?.origin ?? '') + (globalThis.location?.pathname ?? '');
+      void navigator.clipboard?.writeText(`${base}?room=${this.roomCode}`);
+      this.toast(this.ui.actions.linkCopied, 'good');
+    };
+    panel.appendChild(invite);
+
+    for (let i = 0; i < this.players.length; i++) {
+      const pl = this.players[i];
+      const row = el('div', 'player-row' + (pl.you ? ' me' : '') + (pl.idleSeconds > 30 ? ' stale' : ''));
+      const dot = el('span', 'player-dot');
+      dot.style.background = playerColour(i);
+      row.appendChild(dot);
+      const name = el('span', 'player-name', pl.displayName + (pl.you ? ` (${R.you})` : ''));
+      row.appendChild(name);
+      const bar = el('span', 'player-bar');
+      const fill = el('i');
+      fill.style.width = `${Math.round((pl.revealed / Math.max(1, pl.total)) * 100)}%`;
+      fill.style.background = playerColour(i);
+      bar.appendChild(fill);
+      row.appendChild(bar);
+      row.appendChild(el('span', 'player-count', pl.finished ? R.finished : `${pl.revealed}/${pl.total}`));
+      panel.appendChild(row);
+    }
+    panel.appendChild(el('p', 'hint-note', R.codeHint));
+  }
+
+  /* ---------------- action grid ---------------- */
+
+  paintActions() {
+    const A = this.ui.actions;
+    const wrap = $('#actions');
+    wrap.innerHTML = '';
+    const hasTags = this.pencils.some((v) => v !== 0);
+    const mk = (label: string, icon: string, on: () => void, enabled = true) => {
+      const b = el('button', 'action' + (enabled ? '' : ' off'));
+      if (icon) b.appendChild(el('span', 'action-icon', icon));
+      b.appendChild(el('span', '', label));
+      if (enabled) b.onclick = on; else (b as HTMLButtonElement).disabled = true;
+      wrap.appendChild(b);
+      return b;
+    };
+    mk(A.clearTags, '', () => this.clearTags(), hasTags);
+    const insp = mk(A.inspect, '\u{1F50D}', () => {
+      this.inspecting = !this.inspecting;
+      this.inspectClue = null; this.inspectCell = null; this.highlight = 0;
+      this.render();
+    });
+    insp.classList.toggle('on', this.inspecting);
+    mk(A.showHint, '\u{1F4A1}', () => void this.doHint(), this.settings.hintButton !== 'disabled');
+    mk(A.settings, '', () => this.openSettings());
+    mk(A.playTutorial, '', () => this.openTutorial(0));
+    mk(A.shareScenario, '', () => void this.shareScenario());
+    if (this.prefs.mode === 'archive' && this.archiveDate) {
+      const back = el('button', 'action wide', this.ui.archive.back);
+      back.onclick = () => { this.archiveDate = null; this.archiveOpen = true; void this.newBoard(); };
+      wrap.appendChild(back);
+    }
+  }
+
+  clearTags() {
+    if (!this.pencils.some((v) => v !== 0)) { this.toast(this.ui.actions.noTags, 'warn'); return; }
+    this.pencils = new Array(this.session.puzzle.n).fill(0);
+    this.render();
+  }
+
+  /** Boards are pure functions of a seed, so a link is the whole scenario. Ranked boards
+   *  share as a mode + theme instead — the server would refuse a supplied seed anyway. */
+  async shareScenario() {
+    const base = (globalThis.location?.origin ?? '') + (globalThis.location?.pathname ?? '');
+    const q = new URLSearchParams();
+    q.set('g', this.prefs.themeId);
+    if (this.shareSeed) {
+      q.set('s', this.shareSeed);
+      q.set('d', String(this.edition.difficulty));
+    } else {
+      q.set('m', this.prefs.mode);
+    }
+    const url = `${base}?${q.toString()}`;
+    try { await navigator.clipboard?.writeText(url); } catch { /* clipboard may be blocked */ }
+    this.toast(this.ui.actions.linkCopied, 'good');
+  }
+
+  /* ---------------- tutorial ---------------- */
+
+  openTutorial(step: number) {
+    const T = this.ui.tutorial;
+    this.tutorialStep = step;
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'result tutorial-card');
+    card.appendChild(el('h2', '', T.title));
+    card.appendChild(el('p', 'tut-count', `${step + 1} / ${T.steps.length}`));
+    card.appendChild(el('p', 'tut-body', T.steps[step]));
+    const dots = el('div', 'tut-dots');
+    T.steps.forEach((_, i) => {
+      const d = el('span', 'tut-dot' + (i === step ? ' on' : ''));
+      d.onclick = () => this.openTutorial(i);
+      dots.appendChild(d);
+    });
+    card.appendChild(dots);
+    const last = step === T.steps.length - 1;
+    const next = el('button', 'primary', last ? T.done : T.next);
+    next.onclick = () => { if (last) { ov.classList.remove('on'); this.tutorialStep = -1; } else this.openTutorial(step + 1); };
+    const skip = el('button', '', T.skip);
+    skip.onclick = () => { ov.classList.remove('on'); this.tutorialStep = -1; };
+    card.appendChild(next);
+    if (!last) card.appendChild(skip);
+    ov.appendChild(card);
+    ov.classList.add('on');
+  }
+
+  /* ---------------- inspect ---------------- */
+
+  /** Inspect answers the two questions a no-guess puzzle owes the player: what exactly
+   *  does this clue cover, and what exactly do its words mean here. Both matter because
+   *  "all", "both", "most", "between" and "connected" are technical terms on this board. */
+  paintInspect() {
+    const panel = $('#inspect');
+    panel.innerHTML = '';
+    if (!this.inspecting) { panel.style.display = 'none'; return; }
+    panel.style.display = '';
+    const I = this.ui.inspect;
+    const ctx = renderContext(this.theme, this.prefs.locale, this.session.puzzle);
+    panel.appendChild(el('h2', 'panel-head', I.title));
+
+    if (this.inspectClue) {
+      const pc = this.session.puzzle.clues.find((c) => c.id === this.inspectClue);
+      if (pc) {
+        panel.appendChild(el('p', 'insp-clue', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
+        panel.appendChild(el('h3', 'insp-head', I.meaning));
+        panel.appendChild(el('p', 'insp-body', this.loc.explain(pc.clue, ctx)));
+        // naming all twenty squares for a whole-board clue is noise, not information
+        const cells = this.session.touches(pc.clue);
+        panel.appendChild(el('h3', 'insp-head', I.covers));
+        const names = cells.map((c) => ctx.labels[c].text);
+        const list = cells.length === this.session.puzzle.n
+          ? `${this.ui.inspect.whole} (${cells.length})`
+          : names.length > 10
+            ? `${cells.length} — ${names.slice(0, 10).join(', ')}…`
+            : `${cells.length} — ${names.join(', ')}`;
+        panel.appendChild(el('p', 'insp-body', list));
+        panel.appendChild(el('h3', 'insp-head', I.terms));
+        for (const id of termsForClue(pc.clue) as TermId[]) {
+          const t = this.loc.glossary[id];
+          if (!t) continue;
+          const row = el('div', 'term');
+          row.appendChild(el('b', '', t.term));
+          row.appendChild(el('span', '', t.def));
+          panel.appendChild(row);
+        }
+      }
+    } else if (this.inspectCell !== null) {
+      const cell = this.inspectCell;
+      panel.appendChild(el('p', 'insp-clue', ctx.labels[cell].text));
+      panel.appendChild(el('h3', 'insp-head', I.mentions));
+      const hits = this.session.activeClues().filter((pc) => this.session.touches(pc.clue).includes(cell));
+      if (!hits.length) panel.appendChild(el('p', 'insp-body', I.nothing));
+      for (const pc of hits) {
+        const row = el('div', 'clue');
+        row.appendChild(el('p', 'clue-text', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
+        row.onclick = () => {
+          this.inspectClue = pc.id; this.inspectCell = null;
+          this.highlight = maskOf(this.session.touches(pc.clue));
+          this.render();
+        };
+        panel.appendChild(row);
+      }
+      this.highlight = 1 << cell;
+    } else {
+      panel.appendChild(el('p', 'insp-body', I.help));
+    }
+
+    const close = el('button', '', I.close);
+    close.onclick = () => {
+      this.inspecting = false; this.inspectClue = null; this.inspectCell = null;
+      this.highlight = 0; this.render();
+    };
+    panel.appendChild(close);
+  }
+
+  /* ---------------- settings ---------------- */
+
+  openSettings() {
+    const S = this.ui.settings;
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'result settings-card');
+    card.appendChild(el('h2', '', S.title));
+    const rows = el('div', 'setting-rows');
+
+    const select = <K extends keyof Settings>(key: K, label: string, opts: [Settings[K], string][]) => {
+      const row = el('div', 'setting-row');
+      row.appendChild(el('span', 'setting-label', label));
+      const sel = document.createElement('select');
+      for (const [v, l] of opts) {
+        const o = document.createElement('option');
+        o.value = String(v); o.textContent = l;
+        sel.appendChild(o);
+      }
+      sel.value = String(this.settings[key]);
+      sel.onchange = () => {
+        (this.settings[key] as unknown) = sel.value as unknown as Settings[K];
+        this.commitSettings();
+      };
+      row.appendChild(sel);
+      rows.appendChild(row);
+    };
+
+    const check = (key: keyof Settings, label: string) => {
+      const row = el('div', 'setting-row');
+      row.appendChild(el('span', 'setting-label', label));
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.checked = !!this.settings[key];
+      box.onchange = () => { (this.settings[key] as unknown) = box.checked; this.commitSettings(); };
+      row.appendChild(box);
+      rows.appendChild(row);
+    };
+
+    // game + language first: they change everything below them
+    const gameRow = el('div', 'setting-row');
+    gameRow.appendChild(el('span', 'setting-label', S.game));
+    const gameSel = document.createElement('select');
+    for (const t of allThemes()) {
+      const o = document.createElement('option');
+      o.value = t.id; o.textContent = t.strings[this.prefs.locale].title;
+      gameSel.appendChild(o);
+    }
+    gameSel.value = this.prefs.themeId;
+    gameSel.onchange = () => { this.prefs.themeId = gameSel.value; savePrefs(this.prefs); ov.classList.remove('on'); void this.newBoard(); };
+    gameRow.appendChild(gameSel);
+    rows.appendChild(gameRow);
+
+    const langRow = el('div', 'setting-row');
+    langRow.appendChild(el('span', 'setting-label', S.language));
+    const langSel = document.createElement('select');
+    for (const code of ALL_LOCALES) {
+      const o = document.createElement('option');
+      o.value = code; o.textContent = { en: 'English', pt: 'Português', es: 'Español' }[code];
+      langSel.appendChild(o);
+    }
+    langSel.value = this.prefs.locale;
+    langSel.onchange = () => {
+      this.prefs.locale = langSel.value as LocaleCode;
+      savePrefs(this.prefs);
+      this.buildChrome(); this.render(); this.openSettings();
+    };
+    langRow.appendChild(langSel);
+    rows.appendChild(langRow);
+
+    select('font', S.font, [['theme', S.fontTheme], ['sans', S.fontSans], ['serif', S.fontSerif], ['mono', S.fontMono], ['readable', S.fontReadable]]);
+    select('tagSide', S.tagSide, [['right', S.right], ['left', S.left]]);
+    check('autoClearPencil', S.autoClearPencil);
+    select('usedClues', S.usedClues, [['normal', S.normal], ['dim', S.dim], ['hide', S.hide]]);
+    select('hintButton', S.hintButton, [['enabled', S.enabled], ['confirm', S.confirm], ['disabled', S.disabled]]);
+    select('appearance', S.appearance, [['theme', S.followTheme], ['dark', S.dark], ['light', S.light]]);
+    select('colorMode', S.colorMode, [['normal', S.normal], ['contrast', S.highContrast], ['colorblind', S.colorblind]]);
+    select('showTimer', S.showTimer, [['always', S.always], ['onSolve', S.onSolve], ['never', S.never]]);
+    select('showLeaderboard', S.showLeaderboard, [['always', S.always], ['onSolve', S.onSolve], ['never', S.never]]);
+    check('tileArt', S.tileArt);
+    check('reduceMotion', S.reduceMotion);
+    check('undimAtEnd', S.undimAtEnd);
+
+    card.appendChild(rows);
+    const done = el('button', 'primary', S.done);
+    done.onclick = () => ov.classList.remove('on');
+    const reset = el('button', '', S.reset);
+    reset.onclick = () => { this.settings = { ...DEFAULT_SETTINGS }; this.commitSettings(); this.openSettings(); };
+    card.appendChild(done);
+    card.appendChild(reset);
+    ov.appendChild(card);
+    ov.classList.add('on');
+  }
+
+  private commitSettings() {
+    saveSettings(this.settings);
+    this.applySkin();
+    this.render();
+  }
+
+  toast(msg: string, kind: string) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.className = `toast on ${kind}`;
+    setTimeout(() => { t.className = 'toast'; }, 2200);
+  }
+
+  shake(i: number) {
+    const cell = $('#board').children[i] as HTMLElement;
+    cell?.classList.add('shake');
+    setTimeout(() => cell?.classList.remove('shake'), 400);
+  }
+}
+
+/** Stable, high-contrast player colours — distinguishable from the state colours and
+ *  from each other under the colour-blind palette too. */
+const PLAYER_COLOURS = ['#0072b2', '#e69f00', '#009e73', '#cc79a7', '#d55e00', '#56b4e9'];
+function playerColour(i: number): string { return PLAYER_COLOURS[i % PLAYER_COLOURS.length]; }
+
+function maskOf(cells: number[]): number {
+  let m = 0;
+  for (const c of cells) m |= 1 << c;
+  return m;
+}
+
+void new App().start();

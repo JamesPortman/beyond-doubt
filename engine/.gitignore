@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-test/
+demo/dist/
+shots/
+*.db
+*.db-*
+.env
+.env.*
+.vercel/
+.DS_Store

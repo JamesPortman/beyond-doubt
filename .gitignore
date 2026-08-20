@@ -1,0 +1,12 @@
+engine/node_modules/
+engine/dist/
+engine/dist-test/
+engine/demo/dist/
+engine/shots/
+*.db
+*.db-*
+.env
+
+# delivered artefacts, not source
+clues-*.html
+clues-*.zip
