@@ -20,11 +20,34 @@ const pool = new Pool({ connectionString: CONNECTION, max: 2 });
 const store = new PostgresStore(pool);
 const migrated = store.migrate();
 
+/** Login codes by email. Deliberately throws rather than resolving quietly: a sign-in code
+ *  that was never sent must surface as a failed request, not as a player waiting forever for
+ *  a message that is not coming. */
+async function sendEmail(to: string, subject: string, body: string): Promise<void> {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error('RESEND_API_KEY is not set — cannot deliver sign-in codes');
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      from: process.env.MAIL_FROM ?? 'Clues <onboarding@resend.dev>',
+      to,
+      subject,
+      text: body,
+    }),
+  });
+  if (!res.ok) {
+    // 403 here almost always means the unverified resend.dev sender is being used to reach
+    // someone other than the account owner. Keep the provider's message; it is a good one.
+    throw new Error(`email send failed (${res.status}): ${await res.text()}`);
+  }
+}
+
 const server = new GameServer({
   store,
   dev: process.env.NODE_ENV !== 'production',
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
-  // sendEmail: wire Resend / Postmark / SES here before going live
+  sendEmail,
 });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
