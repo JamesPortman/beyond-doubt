@@ -19,6 +19,7 @@ export interface ArtOptions {
 
 const SKIN = ['#f0d5b8', '#e0b892', '#d9a778', '#c08a5e', '#a06a45', '#7d4f33', '#5d3a26'];
 const HAIR = ['#22190f', '#3b2a18', '#5a3d21', '#7d5a2e', '#a8894f', '#c9b48c', '#4a4a52', '#6d2f22', '#8c8c94'];
+const IRIS = ['#4a6741', '#5a4632', '#3f5a6b', '#6b4a3a', '#2f4a3f', '#5c5347'];
 const CLOTH = ['#3d4f63', '#5c4a6b', '#6b4a3d', '#3f5f4a', '#7a3f47', '#4a4a55', '#6b6250'];
 
 export function tileArt(o: ArtOptions): string {
@@ -47,100 +48,143 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
   const p = o.theme.palette;
   const id = `p${o.index}`;
   const skin = mono ? '#ddd8cd' : rng.pick(SKIN);
-  const shadow = mix(skin, '#000000', mono ? 0.12 : 0.2);
-  const blush = mix(skin, '#c2453a', mono ? 0 : 0.14);
+  const shade1 = mix(skin, '#000000', mono ? 0.10 : 0.16);
+  const shade2 = mix(skin, '#000000', mono ? 0.18 : 0.28);
+  const lit = mix(skin, '#ffffff', mono ? 0.10 : 0.22);
+  const blush = mix(skin, '#c2453a', mono ? 0 : 0.18);
   const hair = mono ? '#2a2622' : rng.pick(HAIR);
-  const hairLit = mix(hair, '#ffffff', 0.22);
+  const hairLit = mix(hair, '#ffffff', 0.26);
+  const hairDark = mix(hair, '#000000', 0.35);
   const ink = mono ? '#241f1c' : '#2b2118';
+  const iris = mono ? '#4a453e' : rng.pick(IRIS);
   const cloth = mono ? '#a9a396' : rng.pick(CLOTH);
-  const clothLit = mix(cloth, '#ffffff', 0.16);
-  const backdrop = mono ? '#e9e4d9' : mix(p.tile, p.accent, 0.1);
-  const backdropLo = mix(backdrop, '#000000', 0.12);
+  const clothLit = mix(cloth, '#ffffff', 0.18);
+  const clothDark = mix(cloth, '#000000', 0.3);
+  const backdrop = mono ? '#e9e4d9' : mix(p.tile, p.accent, 0.12);
 
   const hairStyle = rng.int(7);
-  const facial = !mono && rng.next() > 0.68 ? rng.int(3) : -1;
-  const glasses = rng.next() > 0.76;
-  const earring = rng.next() > 0.82;
-  const smiling = rng.next() > 0.42;
-  const eyeY = 45 + rng.int(3);
-  const headW = 17 + rng.next() * 2.4;
+  const collar = rng.int(4);
+  const facial = !mono && rng.next() > 0.66 ? rng.int(3) : -1;
+  const glasses = rng.next() > 0.74;
+  const earring = rng.next() > 0.8;
+  const freckles = !mono && rng.next() > 0.75;
+  const smiling = rng.next() > 0.4;
+  const eyeY = 44 + rng.int(3);
+  const hw = 19.5 + rng.next() * 2.2;          // half-width of the head
   const guilty = o.state === 1;
+
+  // strands, so hair reads as hair rather than a painted cap
+  const strands = Array.from({ length: 7 }, (_, k) => {
+    const x = 50 - hw * 0.82 + (k * hw * 1.64) / 6;
+    return `<path d="M${x.toFixed(1)} ${(26 + rng.next() * 4).toFixed(1)}q${(rng.next() * 5 - 2.5).toFixed(1)} 9 ${(rng.next() * 4 - 2).toFixed(1)} 15"
+      stroke="${k % 2 ? hairLit : hairDark}" stroke-width="0.9" fill="none" opacity=".5" stroke-linecap="round"/>`;
+  }).join('');
 
   const hairBack = [
     '', '',
-    `<path d="M25 46c-3 12-2 24 2 32 2-11 1-22-2-32z" fill="${hair}"/><path d="M75 46c3 12 2 24-2 32-2-11-1-22 2-32z" fill="${hair}"/>`,
-    `<path d="M24 44c-4 16-3 30 2 40 3-14 2-28-2-40z" fill="${hair}"/><path d="M76 44c4 16 3 30-2 40-3-14-2-28 2-40z" fill="${hair}"/>`,
-    '', '', '',
+    `<path d="M${50 - hw - 2} 44c-3 13-2 26 2 34 2-12 1-23-2-34z" fill="${hairDark}"/><path d="M${50 + hw + 2} 44c3 13 2 26-2 34-2-12-1-23 2-34z" fill="${hairDark}"/>`,
+    `<path d="M${50 - hw - 3} 42c-5 18-4 33 2 44 3-15 2-30-2-44z" fill="${hairDark}"/><path d="M${50 + hw + 3} 42c5 18 4 33-2 44-3-15-2-30 2-44z" fill="${hairDark}"/>`,
+    '', '',
+    `<ellipse cx="50" cy="30" rx="${hw + 3}" ry="13" fill="${hairDark}"/>`,
   ][hairStyle];
 
   const hairFront = [
-    `<path d="M29 43c0-15 9-23 21-23s21 8 21 23c0-6-6-11-21-11s-21 5-21 11z" fill="${hair}"/>
-     <path d="M33 34c4-6 10-9 17-9 5 0 9 1 12 3-6-1-18-2-29 6z" fill="${hairLit}" opacity=".5"/>`,
-    `<path d="M28 45c-2-19 10-26 22-26s24 7 22 26c-2-13-8-17-22-17s-20 4-22 17z" fill="${hair}"/>
-     <path d="M35 27c6-4 18-5 26 1-8-1-18-2-26-1z" fill="${hairLit}" opacity=".45"/>`,
-    `<path d="M28 44c1-16 11-24 22-24s21 8 22 24c1 8-2 10-3 5-2-9-8-14-19-14s-17 5-19 14c-1 5-4 3-3-5z" fill="${hair}"/>`,
-    `<ellipse cx="50" cy="33" rx="23" ry="15" fill="${hair}"/><ellipse cx="44" cy="28" rx="10" ry="5" fill="${hairLit}" opacity=".4"/>`,
-    `<path d="M31 42c1-14 10-21 19-21s19 7 20 21c-4-7-11-10-20-10s-15 3-19 10z" fill="${hair}"/>
-     <circle cx="50" cy="19" r="7.5" fill="${hair}"/><circle cx="47" cy="17" r="3" fill="${hairLit}" opacity=".4"/>`,
-    `<path d="M32 44c-1-15 8-23 18-23s19 8 18 23c-3-5-2-11-18-11s-15 6-18 11z" fill="${hair}"/>
-     <path d="M32 44q9-8 18-8t18 8" stroke="${hairLit}" stroke-width="1.2" fill="none" opacity=".45"/>`,
-    `<path d="M30 44c0-14 9-22 20-22s20 8 20 22c-2-4-4-7-7-9-4 3-10 4-16 3-5-1-9-3-11-6-3 2-5 6-6 12z" fill="${hair}"/>`,
+    `<path d="M${50 - hw} 42c0-17 9-25 ${hw} -25s${hw} 8 ${hw} 25c0-7-7-12-${hw}-12s-${hw} 5-${hw} 12z" fill="${hair}"/>
+     <path d="M${50 - hw + 4} 32c5-6 11-9 18-9 4 0 8 1 11 3-7-2-19-2-29 6z" fill="${hairLit}" opacity=".55"/>`,
+    `<path d="M${50 - hw - 1} 44c-2-21 11-28 ${hw + 1} -28s${hw + 1} 7 ${hw + 1} 28c-2-14-9-19-${hw + 1}-19s-${hw - 1} 5-${hw + 1} 19z" fill="${hair}"/>
+     <path d="M40 26c7-4 19-5 27 1-9-1-19-2-27-1z" fill="${hairLit}" opacity=".5"/>`,
+    `<path d="M${50 - hw} 43c1-17 11-25 ${hw} -25s${hw - 1} 8 ${hw} 25c1 9-2 11-3 5-2-10-8-15-${hw - 3}-15s-${hw - 4} 5-${hw - 1} 15c-1 6-4 4-3-5z" fill="${hair}"/>`,
+    `<ellipse cx="50" cy="32" rx="${hw + 2}" ry="16" fill="${hair}"/><ellipse cx="44" cy="27" rx="10" ry="5" fill="${hairLit}" opacity=".45"/>`,
+    `<path d="M${50 - hw + 1} 41c1-15 10-22 ${hw - 1} -22s${hw - 1} 7 ${hw - 1} 22c-4-8-11-11-${hw - 1}-11s-${hw - 5} 3-${hw - 1} 11z" fill="${hair}"/>
+     <circle cx="50" cy="17" r="8" fill="${hair}"/><circle cx="47" cy="15" r="3.4" fill="${hairLit}" opacity=".45"/>`,
+    `<path d="M${50 - hw + 2} 43c-1-16 8-24 ${hw - 2} -24s${hw - 2} 8 ${hw - 2} 24c-3-6-2-12-${hw - 2}-12s-${hw - 4} 6-${hw - 2} 12z" fill="${hair}"/>
+     <path d="M${50 - hw + 2} 43q${hw - 2} -9 ${hw * 2 - 4} 0" stroke="${hairLit}" stroke-width="1.3" fill="none" opacity=".5"/>`,
+    `<path d="M${50 - hw} 43c0-15 9-23 ${hw} -23s${hw} 8 ${hw} 23c-2-5-4-8-7-10-5 4-11 5-17 4-6-1-10-3-12-7-3 2-5 7-6 13z" fill="${hair}"/>`,
   ][hairStyle];
 
+  const collars = [
+    `<path d="M${50 - 12} 70l12 13 12-13 5 3-17 17-17-17z" fill="${clothLit}" opacity=".8"/>
+     <circle cx="50" cy="92" r="1.6" fill="${clothDark}"/>`,
+    `<path d="M${50 - 13} 69l13 14 13-14 4 4-9 27h-16l-9-27z" fill="${clothDark}" opacity=".55"/>
+     <path d="M46 83l4 5 4-5-1 17h-6z" fill="${p.accent}" opacity=".85"/>`,
+    `<path d="M${50 - 14} 70q14 6 28 0l3 4q-17 8-34 0z" fill="${clothLit}" opacity=".7"/>
+     <path d="M36 78q14 7 28 0" stroke="${clothDark}" stroke-width="1.2" fill="none" opacity=".6"/>`,
+    `<path d="M${50 - 12} 70l12 12 12-12 4 3-16 15-16-15z" fill="${clothLit}" opacity=".65"/>
+     <circle cx="50" cy="88" r="3.2" fill="${p.accent}" opacity=".8"/><circle cx="50" cy="88" r="1.2" fill="${clothDark}"/>`,
+  ][collar];
+
   const facialHair = facial === 0
-    ? `<path d="M${50 - headW * 0.62} ${eyeY + 12}q${headW * 0.62} ${16} ${headW * 1.24} 0q-2 16-${headW * 0.62} 16t-${headW * 0.62}-16z" fill="${hair}" opacity=".9"/>`
+    ? `<path d="M${50 - hw * 0.66} ${eyeY + 11}q${hw * 0.66} 17 ${hw * 1.32} 0q-2 17-${hw * 0.66} 17t-${hw * 0.66}-17z" fill="${hairDark}" opacity=".92"/>
+       <path d="M${50 - 6} ${eyeY + 15}q6 4 12 0" stroke="${hair}" stroke-width="1" fill="none" opacity=".5"/>`
     : facial === 1
-      ? `<path d="M44 ${eyeY + 14}q6 3 12 0q-1 4-6 4t-6-4z" fill="${hair}"/>`
+      ? `<path d="M43.5 ${eyeY + 13}q6.5 3.4 13 0q-1 4.4-6.5 4.4t-6.5-4.4z" fill="${hairDark}"/>`
       : facial === 2
-        ? `<path d="M${50 - headW * 0.5} ${eyeY + 15}q${headW * 0.5} 10 ${headW} 0q-3 9-${headW * 0.5} 9t-${headW * 0.5}-9z" fill="${hair}" opacity=".85"/>`
+        ? `<path d="M${50 - hw * 0.5} ${eyeY + 14}q${hw * 0.5} 11 ${hw} 0q-3 10-${hw * 0.5} 10t-${hw * 0.5}-10z" fill="${hairDark}" opacity=".88"/>`
         : '';
+
+  const freckleDots = freckles ? Array.from({ length: 8 }, () => {
+    const side = rng.next() > 0.5 ? 1 : -1;
+    return `<circle cx="${(50 + side * (6 + rng.next() * 7)).toFixed(1)}" cy="${(eyeY + 5 + rng.next() * 6).toFixed(1)}" r="0.55" fill="${shade2}" opacity=".55"/>`;
+  }).join('') : '';
+
+  const eye = (cx: number) => `
+    <ellipse cx="${cx}" cy="${eyeY}" rx="4.2" ry="3" fill="#fdfcfa"/>
+    <ellipse cx="${cx}" cy="${eyeY}" rx="4.2" ry="3" fill="none" stroke="${shade2}" stroke-width="0.5" opacity=".5"/>
+    <circle cx="${cx}" cy="${eyeY}" r="2.5" fill="${iris}"/>
+    <circle cx="${cx}" cy="${eyeY}" r="1.15" fill="${ink}"/>
+    <circle cx="${cx - 0.9}" cy="${eyeY - 1}" r="0.7" fill="#fff"/>
+    <path d="M${cx - 4.2} ${eyeY - 0.6}q4.2-4 8.4 0" stroke="${ink}" stroke-width="1.1" fill="none" stroke-linecap="round"/>`;
 
   return `
     <defs>
-      <linearGradient id="${id}bg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0" stop-color="${backdrop}"/><stop offset="1" stop-color="${backdropLo}"/>
+      <linearGradient id="${id}bg" x1="0" y1="0" x2="0.3" y2="1">
+        <stop offset="0" stop-color="${mix(backdrop, '#ffffff', 0.14)}"/>
+        <stop offset="1" stop-color="${mix(backdrop, '#000000', 0.16)}"/>
       </linearGradient>
-      <radialGradient id="${id}vig" cx="0.5" cy="0.42" r="0.72">
-        <stop offset="0.55" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="${mono ? 0.1 : 0.22}"/>
+      <radialGradient id="${id}vig" cx="0.5" cy="0.4" r="0.7">
+        <stop offset="0.5" stop-color="#000" stop-opacity="0"/>
+        <stop offset="1" stop-color="#000" stop-opacity="${mono ? 0.12 : 0.26}"/>
       </radialGradient>
     </defs>
     <rect width="100" height="100" fill="url(#${id}bg)"/>
+    <ellipse cx="50" cy="97" rx="40" ry="16" fill="#000" opacity=".1"/>
     ${hairBack}
-    <path d="M50 66c-17 0-29 10-31 25-1 5-1 9-1 9h64s0-4-1-9c-2-15-14-25-31-25z" fill="${cloth}"/>
-    <path d="M50 66c-4 0-8 1-11 2l11 14 11-14c-3-1-7-2-11-2z" fill="${mix(skin, '#000000', 0.06)}"/>
-    <path d="M39 68l11 14-4 18h-6z" fill="${clothLit}" opacity=".55"/>
-    <path d="M61 68L50 82l4 18h6z" fill="${clothLit}" opacity=".35"/>
-    <path d="M45 58h10v9q-5 4-10 0z" fill="${shadow}"/>
-    <ellipse cx="${50 - headW - 1}" cy="${eyeY + 3}" rx="3" ry="4.4" fill="${skin}"/>
-    <ellipse cx="${50 + headW + 1}" cy="${eyeY + 3}" rx="3" ry="4.4" fill="${skin}"/>
-    <ellipse cx="${50 - headW - 1}" cy="${eyeY + 3}" rx="1.4" ry="2.2" fill="${shadow}" opacity=".55"/>
-    <ellipse cx="${50 + headW + 1}" cy="${eyeY + 3}" rx="1.4" ry="2.2" fill="${shadow}" opacity=".55"/>
-    <path d="M50 24c-${headW} 0-${headW} 12-${headW} 21 0 13 8 22 ${headW} 22s${headW}-9 ${headW}-22c0-9 0-21-${headW}-21z" fill="${skin}"/>
-    <path d="M50 24c-${headW} 0-${headW} 12-${headW} 21 0 13 8 22 ${headW} 22V24z" fill="${shadow}" opacity=".26"/>
-    <ellipse cx="${50 - headW * 0.62}" cy="${eyeY + 9}" rx="4" ry="2.6" fill="${blush}" opacity="${mono ? 0 : 0.5}"/>
-    <ellipse cx="${50 + headW * 0.62}" cy="${eyeY + 9}" rx="4" ry="2.6" fill="${blush}" opacity="${mono ? 0 : 0.5}"/>
-    ${hairFront}
-    <path d="M${43.5 - rng.next()} ${eyeY - 4}q3.4-2.4 7 -0.2" stroke="${hair}" stroke-width="1.9" fill="none" stroke-linecap="round"/>
-    <path d="M${53.5 + rng.next()} ${eyeY - 4.2}q3.4-2.2 7 0.2" stroke="${hair}" stroke-width="1.9" fill="none" stroke-linecap="round"/>
-    <ellipse cx="43.4" cy="${eyeY}" rx="3.4" ry="2.5" fill="#fdfcfa"/>
-    <ellipse cx="56.6" cy="${eyeY}" rx="3.4" ry="2.5" fill="#fdfcfa"/>
-    <circle cx="${43.4 + rng.next() * 0.8 - 0.4}" cy="${eyeY}" r="1.7" fill="${ink}"/>
-    <circle cx="${56.6 + rng.next() * 0.8 - 0.4}" cy="${eyeY}" r="1.7" fill="${ink}"/>
-    <circle cx="42.8" cy="${eyeY - 0.7}" r="0.6" fill="#fff"/>
-    <circle cx="56" cy="${eyeY - 0.7}" r="0.6" fill="#fff"/>
-    <path d="M40 ${eyeY - 2.4}q3.4-2 6.8 0" stroke="${ink}" stroke-width="0.8" fill="none" opacity=".5"/>
-    <path d="M53.2 ${eyeY - 2.4}q3.4-2 6.8 0" stroke="${ink}" stroke-width="0.8" fill="none" opacity=".5"/>
-    <path d="M50 ${eyeY + 2}q-1.6 4 0.4 6" stroke="${shadow}" stroke-width="1.1" fill="none" stroke-linecap="round" opacity=".8"/>
-    <path d="M${45.6} ${eyeY + 12}q4.4 ${smiling ? 4.2 : -1.6} 8.8 0" stroke="${ink}" stroke-width="1.8" fill="none" stroke-linecap="round"/>
-    ${smiling ? `<path d="M46.6 ${eyeY + 12.4}q3.4 2 6.8 0z" fill="#fff" opacity=".55"/>` : ''}
+    <path d="M50 68c-19 0-32 11-34 28-1 3-1 4-1 4h70s0-1-1-4c-2-17-15-28-34-28z" fill="${cloth}"/>
+    <path d="M28 74c-5 5-9 13-10 22h12z" fill="${clothLit}" opacity=".35"/>
+    <path d="M72 74c5 5 9 13 10 22H70z" fill="${clothDark}" opacity=".45"/>
+    <path d="M44 60h12v10q-6 5-12 0z" fill="${shade2}"/>
+    <path d="M44 60h12v4q-6 4-12 0z" fill="${shade2}" opacity=".7"/>
+    ${collars}
+    <ellipse cx="${50 - hw - 1.5}" cy="${eyeY + 4}" rx="3.4" ry="5" fill="${skin}"/>
+    <ellipse cx="${50 + hw + 1.5}" cy="${eyeY + 4}" rx="3.4" ry="5" fill="${skin}"/>
+    <path d="M${50 - hw - 2.4} ${eyeY + 2}q2.6 1.4 1.6 5" stroke="${shade2}" stroke-width="0.9" fill="none" opacity=".65"/>
+    <path d="M${50 + hw + 2.4} ${eyeY + 2}q-2.6 1.4-1.6 5" stroke="${shade2}" stroke-width="0.9" fill="none" opacity=".65"/>
+    <path d="M50 22c-${hw} 0-${hw} 13-${hw} 22 0 14 8.5 23.5 ${hw} 23.5s${hw}-9.5 ${hw}-23.5c0-9 0-22-${hw}-22z" fill="${skin}"/>
+    <path d="M50 22c-${hw} 0-${hw} 13-${hw} 22 0 14 8.5 23.5 ${hw} 23.5z" fill="${shade1}" opacity=".38"/>
+    <ellipse cx="${50 - hw * 0.3}" cy="30" rx="${hw * 0.55}" ry="7" fill="${lit}" opacity=".4"/>
+    <path d="M${50 - hw + 2} ${eyeY + 14}q${hw - 2} 12 ${hw * 2 - 4} 0" stroke="${shade2}" stroke-width="0.7" fill="none" opacity=".35"/>
+    <ellipse cx="${50 - hw * 0.6}" cy="${eyeY + 8}" rx="4.4" ry="2.8" fill="${blush}" opacity="${mono ? 0 : 0.45}"/>
+    <ellipse cx="${50 + hw * 0.6}" cy="${eyeY + 8}" rx="4.4" ry="2.8" fill="${blush}" opacity="${mono ? 0 : 0.45}"/>
+    ${freckleDots}
+    ${hairFront}${strands}
+    <path d="M${43 - rng.next()} ${eyeY - 5.4}q4-2.8 8 -0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+    <path d="M${53 + rng.next()} ${eyeY - 5.7}q4-2.5 8 0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+    ${eye(50 - hw * 0.42)}
+    ${eye(50 + hw * 0.42)}
+    <path d="M50 ${eyeY + 1}q-2.4 5 0.6 7.4" stroke="${shade2}" stroke-width="1.2" fill="none" stroke-linecap="round"/>
+    <path d="M${50 - 2.6} ${eyeY + 8.4}q2.6 1.6 5.2 0" stroke="${shade2}" stroke-width="0.9" fill="none" opacity=".6"/>
+    <path d="M${50 - 5} ${eyeY + 13}q5 ${smiling ? 4.6 : -1.8} 10 0" stroke="${ink}" stroke-width="1.9" fill="none" stroke-linecap="round"/>
+    ${smiling ? `<path d="M${50 - 4} ${eyeY + 13.4}q4 2.4 8 0z" fill="#fff" opacity=".6"/>` : ''}
+    <path d="M${50 - 4.4} ${eyeY + 11.6}q4.4 -1.6 8.8 0" stroke="${blush}" stroke-width="1.4" fill="none" opacity="${mono ? 0.2 : 0.5}" stroke-linecap="round"/>
     ${facialHair}
-    ${glasses ? `<g stroke="${ink}" stroke-width="1.3" fill="none" opacity=".9">
-        <rect x="38.4" y="${eyeY - 3.6}" width="10" height="7.4" rx="2.4"/>
-        <rect x="51.6" y="${eyeY - 3.6}" width="10" height="7.4" rx="2.4"/>
-        <path d="M48.4 ${eyeY} h3.2M38.4 ${eyeY - 1}l-4-1M61.6 ${eyeY - 1}l4-1"/></g>` : ''}
-    ${earring ? `<circle cx="${50 + headW + 1}" cy="${eyeY + 8}" r="1.6" fill="${p.accent}"/>` : ''}
+    ${glasses ? `<g stroke="${ink}" stroke-width="1.4" fill="none" opacity=".92">
+        <rect x="${50 - hw * 0.42 - 5.4}" y="${eyeY - 4.2}" width="10.8" height="8.4" rx="2.6"/>
+        <rect x="${50 + hw * 0.42 - 5.4}" y="${eyeY - 4.2}" width="10.8" height="8.4" rx="2.6"/>
+        <path d="M${50 - 2.4} ${eyeY} h4.8M${50 - hw * 0.42 - 5.4} ${eyeY - 1.4}l-4.6-1.2M${50 + hw * 0.42 + 5.4} ${eyeY - 1.4}l4.6-1.2"/>
+      </g>` : ''}
+    ${earring ? `<circle cx="${50 + hw + 1.5}" cy="${eyeY + 9}" r="1.8" fill="${p.accent}"/><circle cx="${50 + hw + 1}" cy="${eyeY + 8.4}" r="0.6" fill="#fff" opacity=".7"/>` : ''}
     <rect width="100" height="100" fill="url(#${id}vig)"/>
-    ${guilty ? `<path d="M17 17L83 83M83 17L17 83" stroke="${p.stateB}" stroke-width="6.5" stroke-linecap="round" opacity=".88"/>` : ''}
+    ${guilty ? `<path d="M16 16L84 84M84 16L16 84" stroke="${p.stateB}" stroke-width="7" stroke-linecap="round" opacity=".9"/>` : ''}
     ${mono ? `<rect width="100" height="100" fill="url(#halftone)" opacity=".2"/>` : ''}`;
 }
 

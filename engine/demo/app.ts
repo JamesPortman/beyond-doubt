@@ -256,6 +256,9 @@ class App {
     for (const [k, v] of Object.entries(cssVars(this.theme, this.settings))) root.style.setProperty(k, v);
     document.body.className = this.theme.skinClass;
     document.body.dataset.colorMode = this.settings.colorMode;
+    // Cold Open's labels are sentences ("She burns the letter"), so they stay in sentence
+    // case; every other theme labels a person, a lot or a coordinate, which reads better shouted.
+    document.body.dataset.labelMode = this.theme.labelMode;
     document.body.dataset.motion = this.settings.reduceMotion ? 'reduced' : 'normal';
     document.documentElement.lang = this.loc.bcp47;
   }
