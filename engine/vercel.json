@@ -2,18 +2,20 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build && npm run demo",
   "outputDirectory": "demo/dist",
-  "cleanUrls": true,
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "/api/index" },
-    { "source": "/", "destination": "/clues-demo.html" }
+    { "source": "/api/(.*)", "destination": "/api/index" }
   ],
   "functions": {
     "api/index.ts": { "maxDuration": 10, "memory": 1024 }
   },
   "headers": [
     {
-      "source": "/clues-demo.html",
-      "headers": [{ "key": "cache-control", "value": "public, max-age=0, must-revalidate" }]
+      "source": "/(.*)",
+      "headers": [
+        { "key": "cache-control", "value": "public, max-age=0, must-revalidate" },
+        { "key": "x-content-type-options", "value": "nosniff" },
+        { "key": "referrer-policy", "value": "no-referrer" }
+      ]
     }
   ]
 }
