@@ -25,6 +25,18 @@ export class PostgresStore implements Store {
   }
 
   async migrate(): Promise<void> {
+    try {
+      await this.runMigration();
+    } catch (e) {
+      // Several serverless instances cold-start at once on the first request, so they all
+      // race this. CREATE ... IF NOT EXISTS still raises duplicate_table / duplicate_object
+      // when two transactions create the same object concurrently; losing that race is fine.
+      const code = (e as { code?: string }).code;
+      if (code !== '42P07' && code !== '42710' && code !== '23505') throw e;
+    }
+  }
+
+  private async runMigration(): Promise<void> {
     await this.pool.query(`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,

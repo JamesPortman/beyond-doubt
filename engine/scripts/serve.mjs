@@ -7,10 +7,11 @@ const port = Number(process.env.PORT ?? 8787);
 const prod = process.env.NODE_ENV === 'production';
 
 let store;
-if (process.env.DATABASE_URL) {
+const CONNECTION = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+if (CONNECTION) {
   const { Pool } = await import('pg');
   const { PostgresStore } = await import('../dist/net/store-pg.js');
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 8 });
+  const pool = new Pool({ connectionString: CONNECTION, max: 8 });
   store = new PostgresStore(pool);
   await store.migrate();
 }
@@ -25,7 +26,7 @@ const srv = new GameServer({
 
 if (prod) {
   const missing = [];
-  if (!process.env.DATABASE_URL) missing.push('DATABASE_URL');
+  if (!CONNECTION) missing.push('DATABASE_URL');
   if (!process.env.ALLOWED_ORIGINS) missing.push('ALLOWED_ORIGINS');
   if (missing.length) {
     console.error(`refusing to start in production without: ${missing.join(', ')}`);
