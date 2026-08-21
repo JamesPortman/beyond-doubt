@@ -22,6 +22,7 @@ const srv = new GameServer({
   dev: !prod,
   staticDir: join(here, '..', 'demo', 'dist'),
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  adminToken: process.env.ADMIN_TOKEN,
 });
 
 if (prod) {
@@ -37,6 +38,9 @@ if (prod) {
 const http = srv.listen(port);
 console.log(`clues server on http://localhost:${port} (${prod ? 'production' : 'development'}, ${store ? 'postgres' : 'sqlite'})`);
 if (!prod) console.log('  dev login: the six-digit code comes back in the sign-in response');
+console.log(process.env.ADMIN_TOKEN
+  ? '  admin: /#admin, unlocked with ADMIN_TOKEN'
+  : '  admin: disabled (set ADMIN_TOKEN to enable /api/admin/*)');
 
 // finish in-flight requests before dying, or a player loses the move they just made
 for (const sig of ['SIGTERM', 'SIGINT']) {

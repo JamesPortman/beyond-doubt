@@ -5,7 +5,7 @@ import {
   scoreRun, formatDuration,
   dailyEdition, weeklyEdition, freeEdition, buildPuzzle, EditionRef, isoDate,
   LocalLeaderboard, entryFrom,
-  Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay,
+  Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay, PublicFlags,
   tileArt, ART_DEFS,
   Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
   termsForClue, TermId, dealFor,
@@ -30,14 +30,25 @@ const THEME_IDS = allThemes().map((t) => t.id);
 const LOCAL_ID = 'you';
 
 interface Prefs { themeId: string; locale: LocaleCode; mode: Mode; players: number; }
-const DEFAULTS: Prefs = { themeId: 'guestlist', locale: 'en', mode: 'daily', players: 1 };
+const DEFAULTS: Prefs = { themeId: 'wall', locale: 'en', mode: 'daily', players: 1 };
 const loadPrefs = (): Prefs => {
-  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs.v2') ?? '{}') }; }
+  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs.v3') ?? '{}') }; }
   catch { return { ...DEFAULTS }; }
 };
-const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs.v2', JSON.stringify(p)); } catch { /* ignore */ } };
+const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs.v3', JSON.stringify(p)); } catch { /* ignore */ } };
 
 const localBoard = new LocalLeaderboard();
+
+function toggleRow(label: string, on: boolean, set: (on: boolean) => void): HTMLElement {
+  const row = el('label', 'admin-row');
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.checked = on;
+  box.onchange = () => set(box.checked);
+  row.appendChild(box);
+  row.appendChild(el('span', '', label));
+  return row;
+}
 
 class App {
   prefs = loadPrefs();
@@ -45,6 +56,10 @@ class App {
   inspecting = false;
   inspectClue: string | null = null;
   inspectCell: number | null = null;
+  sheetCell: number | null = null;
+  /** What the operator has left switched on. Absent until the server answers; everything
+   *  is open until then, because a local board needs no permission from anyone. */
+  flags: PublicFlags | null = null;
   hintArmed = false;
   shareSeed: string | null = null;
   tutorialStep = -1;
@@ -70,7 +85,6 @@ class App {
 
   pencils: Pencil[] = [];
   activePlayer = 0;
-  brush: State = 1;
   highlight = 0;
   busy = false;
   serverElapsed = 0;
@@ -116,10 +130,21 @@ class App {
     this.buildChrome();
     await this.newBoard();
     document.addEventListener('keydown', (e) => {
-      if (e.key === '1') { this.brush = 0; this.render(); }
-      if (e.key === '2') { this.brush = 1; this.render(); }
+      // with a square open, the number keys answer it
+      if (this.sheetCell !== null) {
+        if (e.key === 'Escape') { this.closeSheet(); return; }
+        if (e.key === '1' || e.key === '2') {
+          const cell = this.sheetCell;
+          this.closeSheet();
+          void this.flip(cell, (e.key === '1' ? 0 : 1) as State);
+        }
+        return;
+      }
       if (e.key.toLowerCase() === 'h') void this.doHint();
     });
+    const checkHash = () => { if (location.hash === '#admin') void this.openAdmin(); };
+    globalThis.addEventListener?.('hashchange', checkHash);
+    checkHash();
   }
 
   /** Online if a server is reachable AND we have a valid token. Split mode is a
@@ -128,6 +153,20 @@ class App {
     const up = await this.api.reachable();
     const me = up ? await this.api.me() : null;
     this.online = !!(up && me);
+    // Unauthenticated on purpose: a signed-out visitor should see the same closed doors
+    // as everyone else rather than discovering them by walking into one.
+    if (up) { try { this.flags = (await this.api.flags()).flags; } catch { /* leave it open */ } }
+  }
+
+  themeAllowed(id: string): boolean { return !this.flags || this.flags.themes.includes(id); }
+  modeAllowed(m: Mode): boolean {
+    const f = this.flags;
+    if (!f) return true;
+    if (m === 'archive') return f.archive;
+    if (m === 'weekly') return f.weekly;
+    if (m === 'free') return f.free;
+    if (m === 'room') return f.rooms;
+    return true;
   }
 
   /* ---------------- board lifecycle ---------------- */
@@ -254,11 +293,16 @@ class App {
   buildChrome() {
     const gameSel = $('#game') as HTMLSelectElement;
     gameSel.innerHTML = '';
-    for (const t of allThemes()) {
+    const open = allThemes().filter((t) => this.themeAllowed(t.id));
+    for (const t of (open.length ? open : allThemes())) {
       const o = document.createElement('option');
       o.value = t.id;
       o.textContent = t.strings[this.prefs.locale].title;
       gameSel.appendChild(o);
+    }
+    if (!this.themeAllowed(this.prefs.themeId) && open.length) {
+      this.prefs.themeId = open[0].id;
+      savePrefs(this.prefs);
     }
     gameSel.value = this.prefs.themeId;
     gameSel.onchange = () => { this.prefs.themeId = gameSel.value; savePrefs(this.prefs); void this.newBoard(); };
@@ -360,13 +404,13 @@ class App {
     $('#tagline').textContent = this.strings.tagline;
     $('#newBtn').textContent = this.ui.newGame;
     ($('#game') as HTMLSelectElement).value = this.prefs.themeId;
+    this.paintNotice();
     this.paintModes();
     // "ranked" is about THIS run, not the edition: a board you have already completed
     // can be replayed, but the result will not be re-ranked.
     $('#ranked').textContent = !this.online ? '○ local'
       : this.previousResult ? '✓ ' + this.ui.complete
       : this.edition.ranked ? '● ranked' : '○ practice';
-    this.buildBrush();
     this.paintBoard();
     this.paintClues();
     this.paintStatus();
@@ -377,18 +421,6 @@ class App {
     this.paintActions();
     this.paintInspect();
     void this.paintLeaderboard();
-  }
-
-  buildBrush() {
-    const wrap = $('#brush');
-    wrap.innerHTML = '';
-    wrap.appendChild(el('span', 'brush-label', this.ui.markAs));
-    ([0, 1] as State[]).forEach((s) => {
-      const st = s === 1 ? this.strings.states.b : this.strings.states.a;
-      const b = el('button', `chip s${s}` + (this.brush === s ? ' on' : ''), st.name);
-      b.onclick = () => { this.brush = s; this.render(); };
-      wrap.appendChild(b);
-    });
   }
 
   paintBoard() {
@@ -440,7 +472,7 @@ class App {
       cell.onclick = () => {
         this.focusCell = i;
         if (this.inspecting) { this.inspectCell = i; this.inspectClue = null; this.render(); return; }
-        void this.flip(i);
+        this.openTile(i);
       };
       cell.onmouseenter = () => { if (this.roomId) this.focusCell = i; };
       let held: number | null = null;
@@ -610,17 +642,17 @@ class App {
 
   /* ---------------- interaction ---------------- */
 
-  async flip(i: number) {
+  async flip(i: number, state: State) {
     if (this.busy) return;
     // Deduce locally for instant feedback — the client can prove which cells are legal
     // from the clues it holds. The server still re-checks every move.
-    const r = this.session.mark(i, this.brush);
+    const r = this.session.mark(i, state);
     if (r.outcome === 'not-deducible') { this.toast(this.ui.notDeducible, 'warn'); this.shake(i); return; }
 
     if (this.online && this.playId) {
       this.busy = true;
       try {
-        const ack = await this.api.move({ playId: this.playId, cell: i, state: this.brush });
+        const ack = await this.api.move({ playId: this.playId, cell: i, state });
         this.mistakes = ack.mistakes;
         this.hintsUsed = ack.hintsUsed;
         this.serverElapsed = ack.elapsedMs;
@@ -731,7 +763,7 @@ class App {
     ];
     const bar = $('#modes');
     bar.innerHTML = '';
-    for (const [m, label] of modes) {
+    for (const [m, label] of modes.filter(([m]) => this.modeAllowed(m))) {
       const b = el('button', 'tab' + (this.prefs.mode === m ? ' on' : ''), label);
       b.onclick = () => {
         this.prefs.mode = m;
@@ -951,6 +983,214 @@ class App {
     if (!last) card.appendChild(skip);
     ov.appendChild(card);
     ov.classList.add('on');
+  }
+
+  paintNotice() {
+    const box = $('#notice');
+    const text = this.flags?.notice ?? '';
+    box.textContent = text;
+    box.style.display = text ? '' : 'none';
+  }
+
+  /* ---------------- admin ---------------- */
+
+  /** Reached at #admin and nowhere else — there is no link to it, because the token is
+   *  what grants access and a visible door only invites knocking. The secret lives in
+   *  sessionStorage so it dies with the tab, never in localStorage and never in the URL. */
+  async openAdmin() {
+    const ov = $('#overlay');
+    const secret = (() => {
+      try { return globalThis.sessionStorage?.getItem('clues.admin') ?? ''; } catch { return ''; }
+    })();
+
+    const shell = (body: HTMLElement) => {
+      ov.innerHTML = '';
+      const card = el('div', 'sheet admin');
+      card.appendChild(el('h3', '', 'Admin'));
+      card.appendChild(body);
+      const foot = el('div', 'sheet-close');
+      const close = el('button', '', 'Close');
+      close.onclick = () => { location.hash = ''; this.closeSheet(); };
+      foot.appendChild(close);
+      card.appendChild(foot);
+      ov.appendChild(card);
+      ov.classList.add('on');
+    };
+
+    const askForToken = (message?: string) => {
+      const body = el('div', 'admin-body');
+      if (message) body.appendChild(el('p', 'admin-warn', message));
+      body.appendChild(el('p', 'sheet-note', 'Paste the admin token. It is kept for this tab only.'));
+      const input = document.createElement('input');
+      input.type = 'password';
+      input.autocomplete = 'off';
+      input.className = 'admin-token';
+      input.placeholder = 'admin token';
+      body.appendChild(input);
+      const go = el('button', 'admin-save', 'Unlock');
+      const submit = () => {
+        const v = input.value.trim();
+        if (!v) return;
+        try { globalThis.sessionStorage?.setItem('clues.admin', v); } catch { /* ignore */ }
+        void this.openAdmin();
+      };
+      go.onclick = submit;
+      input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+      body.appendChild(go);
+      shell(body);
+      input.focus();
+    };
+
+    if (!secret) { askForToken(); return; }
+
+    let data;
+    try {
+      data = await this.api.adminFlags(secret);
+    } catch (e) {
+      try { globalThis.sessionStorage?.removeItem('clues.admin'); } catch { /* ignore */ }
+      const code = (e as ApiError).status;
+      askForToken(code === 404
+        ? 'This server has no admin surface — ADMIN_TOKEN is not set on it.'
+        : 'That token was refused.');
+      return;
+    }
+
+    const draft = { ...data.flags, themes: [...data.flags.themes] };
+    const body = el('div', 'admin-body');
+
+    body.appendChild(el('h4', 'admin-head', 'Puzzles'));
+    for (const id of data.allThemes) {
+      const theme = allThemes().find((t) => t.id === id);
+      const name = theme ? theme.strings[this.prefs.locale].title : id;
+      body.appendChild(toggleRow(name, draft.themes.includes(id), (on) => {
+        draft.themes = on ? [...draft.themes, id] : draft.themes.filter((t) => t !== id);
+      }));
+    }
+
+    body.appendChild(el('h4', 'admin-head', 'Modes'));
+    const modeRows: [keyof typeof draft, string][] = [
+      ['archive', 'Archive'], ['weekly', 'Weekly edition'], ['free', 'New board (free play)'],
+      ['rooms', 'Rooms'], ['signups', 'New accounts'],
+    ];
+    for (const [key, label] of modeRows) {
+      body.appendChild(toggleRow(label, draft[key] as boolean, (on) => { (draft as any)[key] = on; }));
+    }
+
+    body.appendChild(el('h4', 'admin-head', 'Notice to players'));
+    const notice = document.createElement('textarea');
+    notice.className = 'admin-notice';
+    notice.rows = 2;
+    notice.maxLength = 240;
+    notice.value = draft.notice;
+    notice.placeholder = 'Shown above the board, in every language. Leave empty for none.';
+    body.appendChild(notice);
+
+    const status = el('p', 'sheet-note', data.updatedAt
+      ? `Last changed ${new Date(data.updatedAt).toLocaleString()}`
+      : 'Never changed — these are the defaults.');
+    body.appendChild(status);
+
+    const save = el('button', 'admin-save', 'Save');
+    save.onclick = async () => {
+      draft.notice = notice.value;
+      (save as HTMLButtonElement).disabled = true;
+      try {
+        const r = await this.api.adminSetFlags(secret, draft);
+        this.flags = { themes: r.flags.themes, archive: r.flags.archive, weekly: r.flags.weekly,
+          free: r.flags.free, rooms: r.flags.rooms, notice: r.flags.notice };
+        status.textContent = 'Saved. Players see this within a few seconds.';
+        this.buildChrome();
+      } catch (e) {
+        status.textContent = `Not saved: ${(e as ApiError).code ?? 'error'}`;
+      } finally { (save as HTMLButtonElement).disabled = false; }
+    };
+    body.appendChild(save);
+    shell(body);
+  }
+
+  /* ---------------- the tile sheet ---------------- */
+
+  /** One square, opened. A no-guess board should never make you tap and find out, so the
+   *  sheet says up front whether this square is decidable yet, and when it is not it hands
+   *  you the clues that mention it rather than a refusal. */
+  openTile(i: number) {
+    const p = this.session.puzzle;
+    const ctx = renderContext(this.theme, this.prefs.locale, p);
+    const tagKey = Object.keys(this.theme.tagSchema)[0];
+    const knownB = (this.session.knownB >> i) & 1;
+    const knownA = (this.session.knownA >> i) & 1;
+    const known = !!(knownB || knownA);
+    const d = this.session.deduction();
+    const decidable = !!(((d.forcedA | d.forcedB) >> i) & 1);
+
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'sheet');
+
+    if (this.settings.tileArt) {
+      const art = el('div', 'sheet-art');
+      art.innerHTML = tileArt({
+        theme: this.theme, index: i, labelSeed: p.labelSeed,
+        tag: tagKey ? p.tags[i][tagKey] : undefined,
+        state: known ? (knownB ? 1 : 0) : null,
+      });
+      card.appendChild(art);
+    }
+    card.appendChild(el('h3', '', ctx.labels[i].text));
+    if (tagKey) card.appendChild(el('p', 'sheet-tag', tagLabel(this.theme, this.prefs.locale, tagKey, p.tags[i][tagKey])));
+
+    const A_ = this.strings.states.a, B_ = this.strings.states.b;
+
+    if (known) {
+      card.appendChild(el('p', 'sheet-note', knownB ? B_.name : A_.name));
+    } else if (!decidable) {
+      card.appendChild(el('p', 'sheet-note', this.ui.notDeducible));
+      const hits = this.session.activeClues().filter((pc) => this.session.touches(pc.clue).includes(i));
+      for (const pc of hits.slice(0, 3)) {
+        card.appendChild(el('p', 'sheet-clue', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
+      }
+    }
+
+    if (!known) {
+      const row = el('div', 'sheet-choices');
+      row.appendChild(el('span', 'sheet-prompt', this.ui.markAs));
+      for (const [cls, st, state] of [['pick-a', A_, 0], ['pick-b', B_, 1]] as const) {
+        const btn = el('button', cls, st.name) as HTMLButtonElement;
+        btn.disabled = !decidable;
+        btn.onclick = () => { this.closeSheet(); void this.flip(i, state as State); };
+        row.appendChild(btn);
+      }
+      card.appendChild(row);
+
+      // pencil marks were long-press only, which is a poor thing to discover on a phone
+      const pencils = el('div', 'sheet-pencils');
+      TAG_COLOURS.forEach((colour, n) => {
+        const dot = el('i', (n === 0 ? 'none ' : '') + (this.pencils[i] === n ? 'on' : ''));
+        if (n > 0) dot.style.background = colour;
+        dot.onclick = () => { this.pencils[i] = n as Pencil; this.render(); this.openTile(i); };
+        pencils.appendChild(dot);
+      });
+      card.appendChild(pencils);
+    }
+
+    const foot = el('div', 'sheet-close');
+    const close = el('button', '', this.ui.inspect.close);
+    close.onclick = () => this.closeSheet();
+    foot.appendChild(close);
+    card.appendChild(foot);
+
+    ov.appendChild(card);
+    ov.classList.add('on');
+    ov.onclick = (e) => { if (e.target === ov) this.closeSheet(); };
+    this.sheetCell = i;
+  }
+
+  closeSheet() {
+    this.sheetCell = null;
+    const ov = $('#overlay');
+    ov.classList.remove('on');
+    ov.innerHTML = '';
+    ov.onclick = null;
   }
 
   /* ---------------- inspect ---------------- */

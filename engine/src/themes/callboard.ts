@@ -12,11 +12,13 @@ export const callboard: Theme = {
   skinClass: 'skin-callboard',
   palette: {
     mood: 'dark',
-    bg: '#211d1a', surface: '#2c2722', surfaceAlt: '#35302a',
-    ink: '#ece7dc', inkSoft: '#9c948a', line: '#423b34',
-    tile: '#e8e3d8', tileInk: '#2b2825', tileLine: '#b9b2a6',
+    // A stage-door callboard is painted steel, not warm cork: neutral greys throughout,
+    // with the amber left only on the accent so the pinned notices still read as lit.
+    bg: '#1f2123', surface: '#292c2f', surfaceAlt: '#33373a',
+    ink: '#e8eaec', inkSoft: '#9aa0a5', line: '#3e4347',
+    tile: '#e4e6e8', tileInk: '#26292b', tileLine: '#b0b5b9',
     accent: '#ffc46e', stateA: '#4e7d63', stateB: '#c0392b',
-    glow: 'rgba(255,196,110,.28)',
+    glow: 'rgba(255,196,110,.22)',
   },
   fonts: { display: '"Courier New", ui-monospace, monospace', body: 'ui-monospace, "SF Mono", Menlo, monospace', mono: 'ui-monospace, Menlo, monospace' },
   strings: {

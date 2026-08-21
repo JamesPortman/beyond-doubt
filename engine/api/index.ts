@@ -48,6 +48,9 @@ const server = new GameServer({
   dev: process.env.NODE_ENV !== 'production',
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   sendEmail,
+  // Leave ADMIN_TOKEN unset and /api/admin/* answers 404 like any unknown path: no admin
+  // surface exists until someone deliberately creates one.
+  adminToken: process.env.ADMIN_TOKEN,
 });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {

@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
-import { randomInt } from 'node:crypto';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { Store, SqliteStore, newId, roomCode, UserRow } from './store.js';
@@ -11,6 +11,7 @@ import { scoreRun } from '../core/scoring.js';
 import { dailyEdition, weeklyEdition, archiveEdition, weekId, isoDate, weekdayDifficulty, EditionRef } from '../core/edition.js';
 import { getTheme, themeIds } from '../themes/index.js';
 import '../themes/all.js';
+import { Flags, FLAGS_KEY, sanitizeFlags } from './flags.js';
 
 export interface ServerOptions {
   dbPath?: string;
@@ -30,11 +31,26 @@ export interface ServerOptions {
   allowedOrigins?: string[];
   /** how login codes reach the player. Dev returns them in the response instead. */
   sendEmail?: (to: string, subject: string, body: string) => Promise<void>;
+  /** Shared secret for /api/admin/*. Absent or short and the admin surface does not
+   *  exist at all — there is no default, and no password to guess. */
+  adminToken?: string;
 }
 
 const HINT_BUDGET = 3;
 const TOKEN_TTL = 30 * 86400_000;
 const CODE_TTL = 10 * 60_000;
+/** Long enough that guessing is hopeless; short enough to type once into a phone. */
+const ADMIN_TOKEN_MIN = 24;
+/** Flags are read on nearly every request, so they are cached — but an operator turning
+ *  something off is usually doing it because something is wrong, and should not have to
+ *  wait. Five seconds is the compromise. */
+const FLAGS_TTL_MS = 5_000;
+
+/** The player-facing view of the flags. Deliberately the same shape minus `signups`,
+ *  which is nobody's business but the operator's. */
+export function publicFlags(f: Flags): P.PublicFlags {
+  return { themes: f.themes, archive: f.archive, weekly: f.weekly, free: f.free, rooms: f.rooms, notice: f.notice };
+}
 
 export class GameServer {
   store: Store;
@@ -57,8 +73,61 @@ export class GameServer {
       launchDate: o.launchDate ?? '2026-06-01',
       allowedOrigins: o.allowedOrigins ?? (o.dev === false ? [] : ['*']),
       sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
+      adminToken: o.adminToken ?? '',
       staticDir: o.staticDir,
     };
+  }
+
+  /* ---------------------------- operator flags ---------------------------- */
+
+  private flagCache: { at: number; flags: Flags } | null = null;
+
+  async flags(): Promise<Flags> {
+    const now = this.opts.now();
+    if (this.flagCache && now - this.flagCache.at < FLAGS_TTL_MS) return this.flagCache.flags;
+    let raw: unknown;
+    try { raw = JSON.parse((await this.store.getSetting(FLAGS_KEY)) ?? '{}'); } catch { raw = {}; }
+    const flags = sanitizeFlags(raw);
+    this.flagCache = { at: now, flags };
+    return flags;
+  }
+
+  /** Every mode gate lives here, so there is exactly one place to read to know what an
+   *  operator can switch off and what it costs the player who is mid-game. */
+  private gate(f: Flags, mode: P.StartBody['mode'], themeId: string): void {
+    if (!f.themes.includes(themeId)) throw new HttpError(403, 'theme-disabled');
+    if (mode === 'archive' && !f.archive) throw new HttpError(403, 'archive-disabled');
+    if (mode === 'weekly' && !f.weekly) throw new HttpError(403, 'weekly-disabled');
+    if (mode === 'free' && !f.free) throw new HttpError(403, 'free-disabled');
+  }
+
+  private assertAdmin(req: IncomingMessage): void {
+    const secret = this.opts.adminToken;
+    // No token configured means no admin surface. Not a 401 with a hint — a 404, the
+    // same answer an unknown path gets, so probing tells an attacker nothing.
+    if (!secret || secret.length < ADMIN_TOKEN_MIN) throw new HttpError(404, 'no-such-route');
+    const given = String(req.headers['x-admin-token'] ?? '');
+    const a = Buffer.from(given), b = Buffer.from(secret);
+    // compare over equal lengths so the check cannot be timed for the secret's length
+    if (a.length !== b.length || !timingSafeEqual(a, b)) throw new HttpError(403, 'admin-denied');
+  }
+
+  async adminFlags(req: IncomingMessage): Promise<P.AdminFlagsResult> {
+    this.assertAdmin(req);
+    return {
+      flags: await this.flags(),
+      allThemes: themeIds(),
+      updatedAt: await this.store.settingUpdatedAt(FLAGS_KEY),
+    };
+  }
+
+  async adminSetFlags(req: IncomingMessage, body: { flags?: unknown }): Promise<P.AdminFlagsResult> {
+    this.assertAdmin(req);
+    const next = sanitizeFlags(body?.flags);
+    const now = this.opts.now();
+    await this.store.putSetting(FLAGS_KEY, JSON.stringify(next), now);
+    this.flagCache = { at: now, flags: next };
+    return { flags: next, allThemes: themeIds(), updatedAt: now };
   }
 
   private now() { return this.opts.now(); }
@@ -69,10 +138,12 @@ export class GameServer {
    * already solved offline.
    * ------------------------------------------------------------------ */
 
-  private refFor(body: P.StartBody): { ref: EditionRef; ranked: boolean } {
+  private async refFor(body: P.StartBody): Promise<{ ref: EditionRef; ranked: boolean }> {
+    const flags = await this.flags();
     const today = new Date(this.now());
     const ids = themeIds();
     if (!ids.includes(body.themeId)) throw new HttpError(400, 'unknown-theme');
+    this.gate(flags, body.mode, body.themeId);
     if (body.mode === 'daily') {
       return { ref: dailyEdition(ids, today, body.themeId), ranked: true };
     }
@@ -162,6 +233,9 @@ export class GameServer {
     }
     let user = await this.store.userByEmail(email);
     if (!user) {
+      // Closing signups must never lock out someone who already has an account, so the
+      // gate sits here — after the code checks out, where we know which case this is.
+      if (!(await this.flags()).signups) throw new HttpError(403, 'signups-closed');
       const name = (b.displayName ?? email.split('@')[0]).slice(0, 24);
       user = await this.store.createUser(email, name, this.now());
     } else if (b.displayName) {
@@ -174,7 +248,7 @@ export class GameServer {
   }
 
   async start(user: UserRow, b: P.StartBody): Promise<P.StartResult> {
-    const { ref, ranked } = this.refFor(b);
+    const { ref, ranked } = await this.refFor(b);
     const puzzle = this.puzzleFor(ref);
     const playId = newId('ply');
     await this.store.createPlay({
@@ -294,6 +368,8 @@ export class GameServer {
    *  therefore honest by construction: a player's progress is derived from the moves the
    *  server already validated, not from anything their client claims. */
   async roomJoin(user: UserRow, b: P.RoomJoinBody): Promise<P.RoomJoinResult> {
+    const flags = await this.flags();
+    if (!flags.rooms) throw new HttpError(403, 'rooms-disabled');
     const now = this.now();
     let room = b.code ? await this.store.roomByCode(String(b.code).toUpperCase().trim()) : undefined;
     if (b.code && !room) throw new HttpError(404, 'no-such-room');
@@ -304,7 +380,7 @@ export class GameServer {
         themeId: b.themeId ?? themeIds()[0],
         dayIndex: b.dayIndex,
       };
-      const { ref } = this.refFor(start);
+      const { ref } = await this.refFor(start);
       const id = newId('rm');
       let code = roomCode();
       for (let i = 0; i < 5 && await this.store.roomByCode(code); i++) code = roomCode();
@@ -369,6 +445,7 @@ export class GameServer {
   /** The back catalogue. Dates come from the server's calendar, so a client cannot
    *  invent a day that never ran or reach past the launch date. */
   async archive(user: UserRow, b: P.ArchiveBody): Promise<P.ArchiveResult> {
+    if (!(await this.flags()).archive) throw new HttpError(403, 'archive-disabled');
     const ids = themeIds();
     const themeId = ids.includes(b.themeId) ? b.themeId : ids[0];
     const today = new Date(this.now());
@@ -440,10 +517,12 @@ export class GameServer {
   async today(): Promise<P.TodayResult> {
     const today = new Date(this.now());
     const ids = themeIds();
+    const flags = await this.flags();
     return {
       weekId: weekId(today),
       serverNow: this.now(),
-      editions: ids.map((id) => {
+      flags: publicFlags(flags),
+      editions: ids.filter((id) => flags.themes.includes(id)).map((id) => {
         const ref = dailyEdition(ids, today, id);
         return {
           id: ref.id, kind: 'daily' as const, themeId: id, difficulty: ref.difficulty,
@@ -471,7 +550,7 @@ export class GameServer {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
     }
-    res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization');
+    res.setHeader('Access-Control-Allow-Headers', 'content-type,authorization,x-admin-token');
     res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -509,6 +588,9 @@ export class GameServer {
       case '/api/room/join': return this.roomJoin(await this.auth(req), body);
       case '/api/room/heartbeat': return this.roomHeartbeat(await this.auth(req), body);
       case '/api/today': return this.today();
+      case '/api/flags': return { flags: publicFlags(await this.flags()) };
+      case '/api/admin/flags': return this.adminFlags(req);
+      case '/api/admin/flags/set': return this.adminSetFlags(req, body);
       case '/api/health': return this.health();
       case '/api/board': {
         const u = new URL(req.url ?? '/', 'http://localhost');

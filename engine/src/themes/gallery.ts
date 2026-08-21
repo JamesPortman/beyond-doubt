@@ -32,27 +32,28 @@ const WORKS: { title: string; full: string; oil: boolean }[] = [
   { title: 'The Summit', full: 'Top of Blue Mountain', oil: false },
 ];
 
+/** The image set itself, shared with The Wall. Only the caption and the mark differ:
+ *  Red Dot titles each work and puts a sold dot beside it; The Wall numbers them as
+ *  anonymous lots and stamps the ones its story says are fake. */
+export const GALLERY_IMAGES = {
+  count: WORKS.length,
+  src: (n: number) => `/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
+  credit: (n: number) => {
+    const w = WORKS[n];
+    const medium = `James Portman, ${w.oil ? 'oil on canvas' : 'photograph'}`;
+    // The full title only earns a repeat when the tile had to shorten it.
+    return w.full === w.title ? medium : `${w.full} — ${medium}`;
+  },
+  fixedCast: true,
+} as const;
+
 export const gallery: Theme = {
   id: 'gallery',
   labelMode: 'artwork',
   tagSchema: { size: ['small', 'medium', 'large', 'study'] },
   artKind: 'painting',
   skinClass: 'skin-gallery',
-  images: {
-    count: WORKS.length,
-    src: (n) => `/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
-    title: (n) => WORKS[n].title,
-    // The full title only earns a repeat when the tile had to shorten it.
-    credit: (n) => {
-      const w = WORKS[n];
-      const medium = `James Portman, ${w.oil ? 'oil on canvas' : 'photograph'}`;
-      return w.full === w.title ? medium : `${w.full} — ${medium}`;
-    },
-    // A red dot beside the label is what a gallery actually does when a work sells.
-    // It is also the only mark in the set that leaves the picture itself alone.
-    mark: 'dot',
-    fixedCast: true,
-  },
+  images: { ...GALLERY_IMAGES, title: (n) => WORKS[n].title, mark: 'dot' },
   palette: {
     mood: 'light',
     bg: '#efece6', surface: '#faf8f4', surfaceAlt: '#ffffff',

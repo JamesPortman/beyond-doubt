@@ -51,7 +51,7 @@ export const guestlist: Theme = {
             host: noun('host', 'hosts', 'm'),
             family: noun('relative', 'relatives', 'm'),
             neighbour: noun('neighbour', 'neighbours', 'm'),
-            staff: noun('member of staff', 'staff', 'm'),
+            staff: noun('staff', 'staff', 'm'),
           },
         },
       },

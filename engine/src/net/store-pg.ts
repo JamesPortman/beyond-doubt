@@ -73,7 +73,29 @@ export class PostgresStore implements Store {
         focus_cell INT, joined_at BIGINT NOT NULL, last_seen BIGINT NOT NULL,
         PRIMARY KEY (room_id, user_id));
       CREATE INDEX IF NOT EXISTS room_members_room ON room_members(room_id);
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at BIGINT NOT NULL);
     `);
+  }
+
+  /* ---------- operator settings ---------- */
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const r = await this.one('SELECT value FROM settings WHERE key = $1', [key]);
+    return (r as { value?: string } | undefined)?.value;
+  }
+  async putSetting(key: string, value: string, now: number): Promise<void> {
+    await this.q(
+      `INSERT INTO settings (key, value, updated_at) VALUES ($1, $2, $3)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at`,
+      [key, value, now],
+    );
+  }
+  async settingUpdatedAt(key: string): Promise<number | null> {
+    const r = await this.one('SELECT updated_at FROM settings WHERE key = $1', [key]);
+    // BIGINT comes back as a string from pg, like every other count in this file
+    const v = (r as { updated_at?: string | number } | undefined)?.updated_at;
+    return v === undefined || v === null ? null : Number(v);
   }
 
   /* ---------- users + auth ---------- */

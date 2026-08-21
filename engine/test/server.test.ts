@@ -98,7 +98,7 @@ test('THE BIG ONE: the board the client receives contains no solution and no see
   assert.ok(!/"solution"/.test(wire) && !/"path"/.test(wire), 'nothing on the wire leaks the answer');
 
   const server = srv.puzzleFor({ id: start.edition.id, kind: 'daily', themeId: 'orchard',
-    difficulty: start.edition.difficulty, seed: (srv as any).refFor({ mode: 'daily', themeId: 'orchard' }).ref.seed });
+    difficulty: start.edition.difficulty, seed: (await (srv as any).refFor({ mode: 'daily', themeId: 'orchard' })).ref.seed });
   assert.ok(start.view.clues.length < server.clues.length, 'locked clues are withheld, not just hidden');
   assert.ok(start.view.clues.every((c) => c.gate === null), 'only opening clues are sent');
 });
@@ -477,4 +477,144 @@ test('a sign-in code that could not be delivered fails loudly', async () => {
   });
   // The player must see a failed request, not a cheerful "sent" for a mail that never left.
   await assert.rejects(srv.authRequest({ email: 'a@b.co' }), /provider rejected/);
+});
+
+/* ------------------------------------------------------------------ *
+ * Admin flags. The thing worth testing here is not that a toggle
+ * toggles — it is that a disabled feature is actually shut, and that
+ * the shutting is done by the server rather than by a hidden button.
+ * ------------------------------------------------------------------ */
+
+const SECRET = 'test-admin-secret-long-enough-000';
+const adminReq = (token?: string) =>
+  ({ headers: token === undefined ? {} : { 'x-admin-token': token } }) as any;
+
+test('the admin surface does not exist until a token is configured', async () => {
+  const srv = await makeServer();                       // no adminToken
+  await assert.rejects(() => srv.adminFlags(adminReq(SECRET)), (e: any) => e.status === 404);
+  // and a short one is treated as no token at all rather than a weak one
+  const weak = await makeServer({ adminToken: 'short' });
+  await assert.rejects(() => weak.adminFlags(adminReq('short')), (e: any) => e.status === 404);
+});
+
+test('admin routes refuse a missing or wrong token', async () => {
+  const srv = await makeServer({ adminToken: SECRET });
+  await assert.rejects(() => srv.adminFlags(adminReq()), (e: any) => e.status === 403);
+  await assert.rejects(() => srv.adminFlags(adminReq('')), (e: any) => e.status === 403);
+  await assert.rejects(() => srv.adminFlags(adminReq(SECRET + 'x')), (e: any) => e.status === 403);
+  await assert.rejects(() => srv.adminFlags(adminReq(SECRET.slice(0, -1))), (e: any) => e.status === 403);
+  const ok = await srv.adminFlags(adminReq(SECRET));
+  assert.ok(ok.flags.themes.length > 0);
+});
+
+test('turning a theme off closes it on the server, not just in the menu', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ adminToken: SECRET, now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'flags@b.co');
+  const user = await userOf(srv, token);
+
+  const before = await srv.today();
+  assert.ok(before.editions.some((e) => e.themeId === 'orchard'));
+  await srv.start(user, { mode: 'daily', themeId: 'orchard' });   // works today
+
+  const keep = THEMES.map((t) => t.id).filter((id) => id !== 'orchard');
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { themes: keep } });
+  clk.advance(10_000);                                            // past the flag cache
+
+  const after = await srv.today();
+  assert.ok(!after.editions.some((e) => e.themeId === 'orchard'), 'gone from the listing');
+  assert.equal(after.editions.length, keep.length);
+  // and a client that ignores the listing and asks anyway is refused
+  await assert.rejects(() => srv.start(user, { mode: 'daily', themeId: 'orchard' }),
+    (e: any) => e.status === 403 && e.code === 'theme-disabled');
+  // the themes still on remain playable
+  await srv.start(user, { mode: 'daily', themeId: keep[0] });
+});
+
+test('archive and weekly can each be closed independently', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ adminToken: SECRET, now: clk.now, launchDate: '2026-01-01' });
+  const { token } = await signIn(srv, 'aw@b.co');
+  const user = await userOf(srv, token);
+
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { archive: false, weekly: true } });
+  clk.advance(10_000);
+  await assert.rejects(() => srv.archive(user, { themeId: 'orchard', days: 7 }),
+    (e: any) => e.code === 'archive-disabled');
+  await assert.rejects(() => srv.start(user, { mode: 'archive', themeId: 'orchard', date: '2026-08-01' }),
+    (e: any) => e.code === 'archive-disabled');
+  await srv.start(user, { mode: 'weekly', themeId: 'orchard' });   // weekly still open
+
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { archive: true, weekly: false } });
+  clk.advance(10_000);
+  await srv.archive(user, { themeId: 'orchard', days: 7 });
+  await assert.rejects(() => srv.start(user, { mode: 'weekly', themeId: 'orchard' }),
+    (e: any) => e.code === 'weekly-disabled');
+});
+
+test('closing signups keeps existing players signed in-able', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ adminToken: SECRET, now: clk.now });
+  await signIn(srv, 'already@b.co');                      // account exists before the change
+
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { signups: false } });
+  clk.advance(10_000);
+
+  // the returning player is unaffected — this is the whole point of gating at verify
+  const back = await signIn(srv, 'already@b.co');
+  assert.ok(back.token);
+  // a new address is turned away, and only after its code checked out, so a closed door
+  // never doubles as an "is this email registered?" oracle
+  const req = await srv.authRequest({ email: 'newcomer@b.co' });
+  assert.ok(req.sent, 'the code is still sent');
+  await assert.rejects(() => srv.authVerify({ email: 'newcomer@b.co', code: req.devCode! }),
+    (e: any) => e.code === 'signups-closed');
+});
+
+test('flags survive a restart, and a stored config cannot outlive its themes', async () => {
+  const srv = await makeServer({ adminToken: SECRET });
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { themes: ['orchard'], weekly: false, notice: '  Down for an hour  ' } });
+
+  // same store, new process: this is what a serverless cold start looks like
+  const reborn = new GameServer({ store: srv.store, adminToken: SECRET });
+  const f = (await reborn.adminFlags(adminReq(SECRET))).flags;
+  assert.deepEqual(f.themes, ['orchard']);
+  assert.equal(f.weekly, false);
+  assert.equal(f.notice, 'Down for an hour', 'trimmed');
+
+  // a theme id that no longer exists in the code must not reach the player or the gate
+  await srv.store.putSetting('flags', JSON.stringify({ themes: ['orchard', 'a-theme-we-deleted'] }), 0);
+  const later = new GameServer({ store: srv.store, adminToken: SECRET });
+  assert.deepEqual((await later.flags()).themes, ['orchard']);
+});
+
+test('the last theme cannot be switched off, and a bad payload cannot brick the game', async () => {
+  const srv = await makeServer({ adminToken: SECRET });
+  for (const bad of [{ themes: [] }, { themes: ['nope'] }, { themes: 'orchard' }, null, 'x', 42]) {
+    const r = await srv.adminSetFlags(adminReq(SECRET), { flags: bad });
+    assert.ok(r.flags.themes.length > 0, `empty theme list from ${JSON.stringify(bad)}`);
+    assert.equal((await srv.today()).editions.length > 0, true);
+  }
+  const long = await srv.adminSetFlags(adminReq(SECRET), { flags: { notice: 'x'.repeat(5000) } });
+  assert.equal(long.flags.notice.length, 240, 'notice is capped');
+});
+
+test('players are told what is open, but never whether signups are', async () => {
+  const srv = await makeServer({ adminToken: SECRET });
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { signups: false, rooms: false, notice: 'Back at six' } });
+  const t = await srv.today();
+  assert.equal(t.flags.rooms, false);
+  assert.equal(t.flags.notice, 'Back at six');
+  assert.ok(!('signups' in t.flags), 'signups is not a player-facing fact');
+});
+
+test('rooms can be closed', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ adminToken: SECRET, now: clk.now });
+  const { token } = await signIn(srv, 'rooms@b.co');
+  const user = await userOf(srv, token);
+  await srv.adminSetFlags(adminReq(SECRET), { flags: { rooms: false } });
+  clk.advance(10_000);
+  await assert.rejects(() => srv.roomJoin(user, { mode: 'daily', themeId: 'orchard' }),
+    (e: any) => e.code === 'rooms-disabled');
 });

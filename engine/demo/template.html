@@ -92,9 +92,7 @@
   .day.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
   .day.done{background:color-mix(in srgb, var(--state-a) 22%, transparent)}
 
-  #brush{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
   .stat-note{display:block;font-size:.62rem;white-space:nowrap;letter-spacing:.02em;color:var(--ink-soft);opacity:.8;margin-top:1px}
-  .brush-label{font-size:.82rem;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase}
   .chip.s0.on{background:var(--state-a);border-color:var(--state-a)}
   .chip.s1.on{background:var(--state-b);border-color:var(--state-b)}
 
@@ -102,6 +100,7 @@
   /* square tiles, artwork edge to edge, caption bar across the foot */
   .cell{
     aspect-ratio:1;display:block;padding:0;background:var(--tile);color:var(--tile-ink);
+    container-type:size;
     border:1px solid var(--tile-line);border-radius:4px;
     text-align:left;position:relative;overflow:hidden;
     transition:transform var(--motion,.15s), box-shadow var(--motion,.2s), opacity var(--motion,.2s), filter var(--motion,.2s)
@@ -113,38 +112,54 @@
   .tile-photo{position:absolute;inset:0;display:block;background:var(--tile)}
   .tile-photo img{width:100%;height:100%;object-fit:cover;display:block;user-select:none}
   .tile-photo .tile-overlay{position:absolute;inset:0}
+  /* The caption is a fixed 20% of the tile, so the picture always gets the other 80%
+     and every tile on the board has its label on the same line. Type is sized in cqh —
+     a share of the tile's own height — so it scales with the board instead of being
+     right at one width and wrong at every other. */
   .cap{
-    position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:0;
-    padding:6px 8px 7px;background:color-mix(in srgb, var(--tile-ink) 90%, transparent);
-    color:var(--tile);backdrop-filter:blur(1px)
+    position:absolute;left:0;right:0;bottom:0;height:25cqh;
+    display:flex;flex-direction:column;justify-content:center;gap:0;overflow:hidden;
+    padding:0 6cqw;background:var(--tile-ink);
+    color:var(--tile)
   }
   /* The person is the subject of the tile, so the person is what shouts. The role is
      supporting information and now reads as ordinary words rather than a label. */
-  .cell-name{font-size:.95rem;font-weight:800;line-height:1.12;letter-spacing:.055em;
+  .cell-name{font-size:13cqh;font-weight:800;line-height:1.1;letter-spacing:.04em;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     font-family:var(--font-body);text-shadow:0 1px 2px rgba(0,0,0,.45)}
   body:not([data-label-mode="title"]):not([data-label-mode="artwork"]) .cell-name{text-transform:uppercase}
-  .cell-tag{display:block;font-size:.72rem;letter-spacing:.005em;text-transform:none;opacity:.78;
-    font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
+  .cell-tag{display:block;font-size:8cqh;letter-spacing:.005em;text-transform:none;opacity:.78;
+    font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.5cqh}
   .cell-tag::first-letter{text-transform:uppercase}
-  /* A work's title is a real title, not a first name: it can run to two words and it has
-     to stay legible on a four-across phone board, so it wraps rather than truncating. */
   body[data-label-mode="artwork"] .cell-name{
-    font-size:.72rem;letter-spacing:-.005em;line-height:1.15;white-space:normal;text-shadow:none;
-    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2}
-  body[data-label-mode="artwork"] .cell-tag{font-size:.64rem;opacity:.7}
+    font-size:12cqh;letter-spacing:-.01em;text-shadow:none}
+  body[data-label-mode="artwork"] .cell-tag{font-size:7.6cqh;opacity:.7}
   /* Over a photograph a translucent caption is unreadable, and a gallery does not print
      its labels on the painting anyway: this is the card under the picture. */
   body[data-label-mode="artwork"] .cap{
-    padding:4px 5px 5px;background:var(--tile-ink);backdrop-filter:none}
+    padding:0 4cqw;background:var(--tile-ink);backdrop-filter:none}
   .cell-state{
     position:absolute;top:7px;right:var(--tag-right,7px);left:var(--tag-left,auto);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;
     padding:3px 7px;border-radius:3px;background:var(--tile-ink);color:var(--tile);font-weight:700
   }
-  .cell.forced::after{
-    content:"";position:absolute;left:7px;top:7px;width:6px;height:6px;border-radius:50%;
-    background:var(--accent);box-shadow:0 0 8px var(--glow)
+  /* A decidable square used to be flagged by a 6px dot in the corner, which is a lot to
+     ask of a player scanning twenty tiles on a phone. The whole square lights instead:
+     an accent ring, and the label plate takes the accent so it reads at arm's length. */
+  /* The ring is drawn in --ink rather than --accent because every palette guarantees
+     ink reads against its own background, and one theme (The Wall) already frames each
+     tile in something very close to its accent — an accent ring vanished there. */
+  .cell.forced{
+    outline:3px solid var(--ink);outline-offset:1px;
+    box-shadow:0 0 18px var(--glow, transparent), 0 4px 12px rgba(0,0,0,.24)
   }
+  /* The wash goes over the picture, not the label. Tinting the label plate with the
+     accent looked stronger but put pale text on gold in half the themes; the picture
+     can take a colour cast, the words cannot. */
+  .cell.forced::before{
+    content:"";position:absolute;left:0;right:0;top:0;bottom:25cqh;
+    background:var(--accent);opacity:.28;pointer-events:none;z-index:1
+  }
+  .cell.forced .cap{box-shadow:0 -1px 0 var(--accent)}
   .cell.is-a{border-color:var(--state-a);box-shadow:inset 0 0 0 3px var(--state-a)}
   .cell.is-b{border-color:var(--state-b);box-shadow:inset 0 0 0 3px var(--state-b)}
   .cell.is-a .cell-state{background:var(--state-a);color:#fff}
@@ -271,6 +286,54 @@
   .result button{margin:0 4px}
   .result .primary{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
 
+  #notice{margin:0 0 12px;padding:10px 14px;border-radius:6px;border:1px solid var(--accent);
+    background:color-mix(in srgb, var(--accent) 12%, transparent);color:var(--ink);
+    font-size:.92rem;line-height:1.45}
+
+  /* ---------- admin ---------- */
+  .sheet.admin{width:min(420px,92vw);text-align:left;max-height:86vh;overflow:auto}
+  .sheet.admin h3{text-align:center}
+  .admin-body{padding:0 22px}
+  .admin-head{margin:18px 0 6px;font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700}
+  .admin-row{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:.95rem;cursor:pointer}
+  .admin-row input{width:18px;height:18px;accent-color:var(--accent);cursor:pointer}
+  .admin-token,.admin-notice{width:100%;box-sizing:border-box;margin:8px 0;padding:10px 12px;
+    font:inherit;font-size:.95rem;border:1px solid var(--line);border-radius:6px;
+    background:var(--surface);color:var(--ink)}
+  .admin-warn{margin:0 0 6px;color:var(--state-b);font-size:.9rem;font-weight:600}
+  .admin-save{width:100%;margin:14px 0 4px;padding:12px;font-size:1rem;font-weight:700;
+    border:none;border-radius:6px;background:var(--accent);color:var(--bg);cursor:pointer}
+  .admin-save:disabled{opacity:.5}
+
+  /* ---------- the tile sheet: one square, opened ---------- */
+  .sheet{background:var(--surface-alt);border:1px solid var(--line);border-radius:10px;
+    padding:0;text-align:center;width:min(340px,88vw);overflow:hidden;
+    box-shadow:0 18px 50px rgba(0,0,0,.45)}
+  .sheet-art{width:132px;height:132px;margin:22px auto 0;position:relative;overflow:hidden;
+    border-radius:6px;border:1px solid var(--tile-line);background:var(--tile)}
+  .sheet-art .tile-art{width:100%;height:100%;display:block}
+  .sheet h3{font-family:var(--font-display);font-size:1.5rem;margin:14px 0 2px;color:var(--ink)}
+  .sheet .sheet-tag{margin:0 0 4px;color:var(--ink-soft);font-size:.95rem}
+  .sheet .sheet-note{margin:10px 20px 0;color:var(--ink-soft);font-size:.86rem;line-height:1.45}
+  .sheet .sheet-clue{margin:8px 18px 0;padding-left:9px;border-left:2px solid var(--accent);
+    text-align:left;font-size:.88rem;line-height:1.45;color:var(--ink)}
+  .sheet-choices{display:flex;flex-wrap:wrap;gap:10px;justify-content:center;padding:14px 20px 18px;
+    margin-top:16px;background:color-mix(in srgb, var(--ink) 6%, transparent)}
+  .sheet-prompt{flex-basis:100%;font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;
+    color:var(--ink-soft);font-weight:700}
+  .sheet-choices button{flex:1;padding:14px 8px;font-size:1rem;font-weight:700;border:none;
+    border-radius:6px;color:#fff;cursor:pointer}
+  .sheet-choices .pick-a{background:var(--state-a)}
+  .sheet-choices .pick-b{background:var(--state-b)}
+  .sheet-choices button:disabled{opacity:.38;cursor:not-allowed}
+  .sheet-pencils{display:flex;gap:9px;justify-content:center;padding:14px 0 0}
+  .sheet-pencils i{width:22px;height:22px;border-radius:50%;cursor:pointer;
+    box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),0 1px 3px rgba(0,0,0,.4)}
+  .sheet-pencils i.none{background:transparent;box-shadow:inset 0 0 0 2px var(--line)}
+  .sheet-pencils i.on{outline:2px solid var(--accent);outline-offset:2px}
+  .sheet-close{padding:16px 0 20px}
+
   /* ---------- per-theme skin flourishes: the artwork carries the rest ---------- */
   .skin-orchard{background-image:repeating-linear-gradient(90deg,rgba(210,96,26,.06) 0 2px,transparent 2px 6px)}
   .skin-orchard .cell{border-radius:3px}
@@ -296,8 +359,8 @@
   .skin-plate19 .cell.is-b{box-shadow:inset 0 0 0 3px var(--state-b), inset 0 0 26px var(--glow)}
 
   .skin-guestlist .cell{border-radius:2px;box-shadow:0 2px 6px rgba(0,0,0,.45)}
-  .skin-guestlist .cell::after{content:"";position:absolute;inset:4px;border:1px solid rgba(217,164,65,.42);
-    pointer-events:none;border-radius:1px}
+  .skin-guestlist .cell::after{content:"";position:absolute;inset:4px;bottom:calc(25cqh + 4px);
+    border:1px solid rgba(217,164,65,.42);pointer-events:none;border-radius:1px}
   .skin-guestlist .cell-name{letter-spacing:.07em}
 </style>
 </head>
@@ -316,6 +379,7 @@
     </div>
   </header>
 
+  <div id="notice"></div>
   <div id="modes"></div>
   <div id="week"></div>
   <div id="players"></div>
@@ -324,7 +388,6 @@
     <main>
       <div id="archive"></div>
       <div id="playarea">
-      <div id="brush"></div>
       <div id="board"></div>
       <div id="actions"></div>
       <div id="status">

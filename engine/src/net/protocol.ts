@@ -167,6 +167,30 @@ export interface ArchiveResult {
 
 export interface BoardResult { entries: LeaderboardEntry[]; you: LeaderboardEntry | null; }
 export interface WeekResult { standings: WeeklyStanding[]; weekId: string; }
-export interface TodayResult { editions: EditionInfo[]; weekId: string; serverNow: number; }
+/** What a player is told about the operator's switches. No `signups`: whether the doors
+ *  are open to new accounts is the operator's business, and the sign-in flow says so at
+ *  the point it matters. */
+export interface PublicFlags {
+  themes: string[];
+  archive: boolean;
+  weekly: boolean;
+  free: boolean;
+  rooms: boolean;
+  notice: string;
+}
+
+export interface FlagsResult { flags: PublicFlags; }
+export interface AdminFlagsResult {
+  flags: import('./flags.js').Flags;
+  allThemes: string[];
+  updatedAt: number | null;
+}
+
+export interface TodayResult {
+  editions: EditionInfo[];
+  weekId: string;
+  serverNow: number;
+  flags: PublicFlags;
+}
 
 export interface ApiErrorBody { error: string; detail?: string; }

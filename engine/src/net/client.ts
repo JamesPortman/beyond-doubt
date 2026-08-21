@@ -28,6 +28,27 @@ export class Api {
 
   requestCode(email: string) { return this.call<P.AuthRequestResult>('/api/auth/request', { email }); }
 
+  flags() { return this.call<P.FlagsResult>('/api/flags'); }
+
+  /** The admin secret travels in its own header and is never persisted by this class —
+   *  the caller decides where it lives, and the demo keeps it in sessionStorage so it
+   *  dies with the tab. */
+  private async admin<T>(path: string, secret: string, body?: unknown): Promise<T> {
+    const res = await fetch(this.base + path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-admin-token': secret },
+      body: JSON.stringify(body ?? {}),
+    });
+    const data = await res.json().catch(() => ({ error: 'bad-response' }));
+    if (!res.ok) throw new ApiError((data as P.ApiErrorBody).error ?? 'error', res.status);
+    return data as T;
+  }
+
+  adminFlags(secret: string) { return this.admin<P.AdminFlagsResult>('/api/admin/flags', secret); }
+  adminSetFlags(secret: string, flags: unknown) {
+    return this.admin<P.AdminFlagsResult>('/api/admin/flags/set', secret, { flags });
+  }
+
   async verify(email: string, code: string, displayName?: string): Promise<P.PublicUser> {
     const r = await this.call<P.AuthVerifyResult>('/api/auth/verify', { email, code, displayName });
     this.token = r.token;

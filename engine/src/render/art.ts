@@ -98,9 +98,9 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
   const shade2 = mix(skin, '#000000', mono ? 0.18 : 0.28);
   const lit = mix(skin, '#ffffff', mono ? 0.10 : 0.22);
   const blush = mix(skin, '#c2453a', mono ? 0 : 0.18);
+  // One flat colour, no highlight and no shadow pass. Lit and dark variants read as
+  // individual strands at tile size, which is exactly what they should not do.
   const hair = mono ? '#2a2622' : rng.pick(HAIR);
-  const hairLit = mix(hair, '#ffffff', 0.26);
-  const hairDark = mix(hair, '#000000', 0.35);
   const ink = mono ? '#241f1c' : '#2b2118';
   const iris = mono ? '#4a453e' : rng.pick(IRIS);
   const cloth = mono ? '#a9a396' : rng.pick(CLOTH);
@@ -108,7 +108,7 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
   const clothDark = mix(cloth, '#000000', 0.3);
   const backdrop = mono ? '#e9e4d9' : mix(p.tile, p.accent, 0.12);
 
-  const hairStyle = rng.int(7);
+  const hairStyle = rng.int(9);
   const collar = rng.int(4);
   const facial = !mono && rng.next() > 0.66 ? rng.int(3) : -1;
   const glasses = rng.next() > 0.74;
@@ -121,25 +121,31 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
 
   const hairBack = [
     '', '',
-    `<path d="M${50 - hw - 2} 44c-3 13-2 26 2 34 2-12 1-23-2-34z" fill="${hairDark}"/><path d="M${50 + hw + 2} 44c3 13 2 26-2 34-2-12-1-23 2-34z" fill="${hairDark}"/>`,
-    `<path d="M${50 - hw - 3} 42c-5 18-4 33 2 44 3-15 2-30-2-44z" fill="${hairDark}"/><path d="M${50 + hw + 3} 42c5 18 4 33-2 44-3-15-2-30 2-44z" fill="${hairDark}"/>`,
+    `<path d="M${50 - hw - 2} 44c-3 13-2 26 2 34 2-12 1-23-2-34z" fill="${hair}"/><path d="M${50 + hw + 2} 44c3 13 2 26-2 34-2-12-1-23 2-34z" fill="${hair}"/>`,
+    `<path d="M${50 - hw - 3} 42c-5 18-4 33 2 44 3-15 2-30-2-44z" fill="${hair}"/><path d="M${50 + hw + 3} 42c5 18 4 33-2 44-3-15-2-30 2-44z" fill="${hair}"/>`,
     '', '',
-    `<ellipse cx="50" cy="30" rx="${hw + 3}" ry="13" fill="${hairDark}"/>`,
-  ][hairStyle];
+    `<ellipse cx="50" cy="30" rx="${hw + 3}" ry="13" fill="${hair}"/>`,
+    // bald: nothing behind the head at all
+    '',
+    // receding: a horseshoe that shows only around the sides and back of the skull
+    `<ellipse cx="50" cy="48" rx="${hw + 1.5}" ry="17" fill="${hair}"/>`,
+    ][hairStyle];
 
   const hairFront = [
-    `<path d="M${50 - hw} 42c0-17 9-25 ${hw} -25s${hw} 8 ${hw} 25c0-7-7-12-${hw}-12s-${hw} 5-${hw} 12z" fill="${hair}"/>
-     <path d="M${50 - hw + 4} 32c5-6 11-9 18-9 4 0 8 1 11 3-7-2-19-2-29 6z" fill="${hairLit}" opacity=".55"/>`,
-    `<path d="M${50 - hw - 1} 44c-2-21 11-28 ${hw + 1} -28s${hw + 1} 7 ${hw + 1} 28c-2-14-9-19-${hw + 1}-19s-${hw - 1} 5-${hw + 1} 19z" fill="${hair}"/>
-     <path d="M40 26c7-4 19-5 27 1-9-1-19-2-27-1z" fill="${hairLit}" opacity=".5"/>`,
+    `<path d="M${50 - hw} 42c0-17 9-25 ${hw} -25s${hw} 8 ${hw} 25c0-7-7-12-${hw}-12s-${hw} 5-${hw} 12z" fill="${hair}"/>`,
+    `<path d="M${50 - hw - 1} 44c-2-21 11-28 ${hw + 1} -28s${hw + 1} 7 ${hw + 1} 28c-2-14-9-19-${hw + 1}-19s-${hw - 1} 5-${hw + 1} 19z" fill="${hair}"/>`,
     `<path d="M${50 - hw} 43c1-17 11-25 ${hw} -25s${hw - 1} 8 ${hw} 25c1 9-2 11-3 5-2-10-8-15-${hw - 3}-15s-${hw - 4} 5-${hw - 1} 15c-1 6-4 4-3-5z" fill="${hair}"/>`,
-    `<ellipse cx="50" cy="32" rx="${hw + 2}" ry="16" fill="${hair}"/><ellipse cx="44" cy="27" rx="10" ry="5" fill="${hairLit}" opacity=".45"/>`,
+    `<ellipse cx="50" cy="32" rx="${hw + 2}" ry="16" fill="${hair}"/>`,
     `<path d="M${50 - hw + 1} 41c1-15 10-22 ${hw - 1} -22s${hw - 1} 7 ${hw - 1} 22c-4-8-11-11-${hw - 1}-11s-${hw - 5} 3-${hw - 1} 11z" fill="${hair}"/>
-     <circle cx="50" cy="17" r="8" fill="${hair}"/><circle cx="47" cy="15" r="3.4" fill="${hairLit}" opacity=".45"/>`,
-    `<path d="M${50 - hw + 2} 43c-1-16 8-24 ${hw - 2} -24s${hw - 2} 8 ${hw - 2} 24c-3-6-2-12-${hw - 2}-12s-${hw - 4} 6-${hw - 2} 12z" fill="${hair}"/>
-     <path d="M${50 - hw + 2} 43q${hw - 2} -9 ${hw * 2 - 4} 0" stroke="${hairLit}" stroke-width="1.3" fill="none" opacity=".5"/>`,
+     <circle cx="50" cy="19" r="7" fill="${hair}"/>`,
+    `<path d="M${50 - hw + 2} 43c-1-16 8-24 ${hw - 2} -24s${hw - 2} 8 ${hw - 2} 24c-3-6-2-12-${hw - 2}-12s-${hw - 4} 6-${hw - 2} 12z" fill="${hair}"/>`,
     `<path d="M${50 - hw} 43c0-15 9-23 ${hw} -23s${hw} 8 ${hw} 23c-2-5-4-8-7-10-5 4-11 5-17 4-6-1-10-3-12-7-3 2-5 7-6 13z" fill="${hair}"/>`,
-  ][hairStyle];
+    // bald
+    '',
+    // receding: the horseshoe comes forward at the temples and stops
+    `<path d="M${50 - hw} 44q1-9 6-12-3 6-2.6 12z" fill="${hair}"/>
+     <path d="M${50 + hw} 44q-1-9-6-12 3 6 2.6 12z" fill="${hair}"/>`,
+    ][hairStyle];
 
   const collars = [
     `<path d="M${50 - 12} 70l12 13 12-13 5 3-17 17-17-17z" fill="${clothLit}" opacity=".8"/>
@@ -153,12 +159,11 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
   ][collar];
 
   const facialHair = facial === 0
-    ? `<path d="M${50 - hw * 0.66} ${eyeY + 11}q${hw * 0.66} 17 ${hw * 1.32} 0q-2 17-${hw * 0.66} 17t-${hw * 0.66}-17z" fill="${hairDark}" opacity=".92"/>
-       <path d="M${50 - 6} ${eyeY + 15}q6 4 12 0" stroke="${hair}" stroke-width="1" fill="none" opacity=".5"/>`
+    ? `<path d="M${50 - hw * 0.66} ${eyeY + 11}q${hw * 0.66} 17 ${hw * 1.32} 0q-2 17-${hw * 0.66} 17t-${hw * 0.66}-17z" fill="${hair}" opacity=".92"/>`
     : facial === 1
-      ? `<path d="M43.5 ${eyeY + 13}q6.5 3.4 13 0q-1 4.4-6.5 4.4t-6.5-4.4z" fill="${hairDark}"/>`
+      ? `<path d="M43.5 ${eyeY + 13}q6.5 3.4 13 0q-1 4.4-6.5 4.4t-6.5-4.4z" fill="${hair}"/>`
       : facial === 2
-        ? `<path d="M${50 - hw * 0.5} ${eyeY + 14}q${hw * 0.5} 11 ${hw} 0q-3 10-${hw * 0.5} 10t-${hw * 0.5}-10z" fill="${hairDark}" opacity=".88"/>`
+        ? `<path d="M${50 - hw * 0.5} ${eyeY + 14}q${hw * 0.5} 11 ${hw} 0q-3 10-${hw * 0.5} 10t-${hw * 0.5}-10z" fill="${hair}" opacity=".88"/>`
         : '';
 
   const freckleDots = freckles ? Array.from({ length: 8 }, () => {
@@ -187,9 +192,10 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
       </radialGradient>
     </defs>
     <rect width="100" height="100" fill="url(#${id}bg)"/>
-    <ellipse cx="50" cy="97" rx="40" ry="16" fill="#000" opacity=".1"/>
+    <g transform="translate(0,-6)">
+    <ellipse cx="50" cy="99" rx="40" ry="16" fill="#000" opacity=".1"/>
     ${hairBack}
-    <path d="M50 68c-19 0-32 11-34 28-1 3-1 4-1 4h70s0-1-1-4c-2-17-15-28-34-28z" fill="${cloth}"/>
+    <path d="M50 68c-19 0-32 11-34 28l-1 22h70l-1-22c-2-17-15-28-34-28z" fill="${cloth}"/>
     <path d="M28 74c-5 5-9 13-10 22h12z" fill="${clothLit}" opacity=".35"/>
     <path d="M72 74c5 5 9 13 10 22H70z" fill="${clothDark}" opacity=".45"/>
     <path d="M44 60h12v10q-6 5-12 0z" fill="${shade2}"/>
@@ -207,8 +213,8 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
     <ellipse cx="${50 + hw * 0.6}" cy="${eyeY + 8}" rx="4.4" ry="2.8" fill="${blush}" opacity="${mono ? 0 : 0.45}"/>
     ${freckleDots}
     ${hairFront}
-    <path d="M${43 - rng.next()} ${eyeY - 5.4}q4-2.8 8 -0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
-    <path d="M${53 + rng.next()} ${eyeY - 5.7}q4-2.5 8 0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+    <path d="M${43 - rng.next()} ${eyeY - 5.4}q4-2.8 8 -0.3" stroke="${hair}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
+    <path d="M${53 + rng.next()} ${eyeY - 5.7}q4-2.5 8 0.3" stroke="${hair}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
     ${eye(50 - hw * 0.42)}
     ${eye(50 + hw * 0.42)}
     <path d="M50 ${eyeY + 1}q-2.4 5 0.6 7.4" stroke="${shade2}" stroke-width="1.2" fill="none" stroke-linecap="round"/>
@@ -223,6 +229,7 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
         <path d="M${50 - 2.4} ${eyeY} h4.8M${50 - hw * 0.42 - 5.4} ${eyeY - 1.4}l-4.6-1.2M${50 + hw * 0.42 + 5.4} ${eyeY - 1.4}l4.6-1.2"/>
       </g>` : ''}
     ${earring ? `<circle cx="${50 + hw + 1.5}" cy="${eyeY + 9}" r="1.8" fill="${p.accent}"/><circle cx="${50 + hw + 1}" cy="${eyeY + 8.4}" r="0.6" fill="#fff" opacity=".7"/>` : ''}
+    </g>
     <rect width="100" height="100" fill="url(#${id}vig)"/>
     ${guilty ? `<path d="M16 16L84 84M84 16L16 84" stroke="${p.stateB}" stroke-width="7" stroke-linecap="round" opacity=".9"/>` : ''}
     ${mono ? `<rect width="100" height="100" fill="url(#halftone)" opacity=".2"/>` : ''}`;
@@ -373,6 +380,36 @@ function painting(rng: Rng, o: ArtOptions): string {
 
 /* ------------------------------------------------------------------ */
 
+
+/** The identity photo inside a service record. The old version was the generic
+ *  circle-on-a-blob user glyph; this is a bust with a jaw, a neck, and a collar line,
+ *  varied per file so a page of records is not the same person twenty times.
+ *  Drawn to the photo window at x 10..38, y 24..58. */
+function silhouette(rng: Rng, c: string): string {
+  const cx = 24;
+  const jaw = 6.6 + rng.next() * 1.3;          // half-width at the cheekbones
+  const topY = 28.5 - rng.next() * 1.6;
+  const chinY = topY + 13 + rng.next() * 1.5;
+  const crop = rng.int(4);                      // how the hair sits on the skull
+  const shoulder = 11.4 + rng.next() * 1.6;
+
+  const head = `<path d="M${cx} ${topY}c-${jaw} 0-${jaw} 4.4-${jaw} 7.2 0 4.6 ${jaw * 0.55} ${chinY - topY - 7.2} ${jaw} ${chinY - topY - 7.2}s${jaw}-${chinY - topY - 7.2 - 0.1} ${jaw}-${chinY - topY - 7.2}c0-2.8 0-7.2-${jaw}-7.2z" fill="${c}"/>`;
+
+  const hair = [
+    `<path d="M${cx - jaw - 0.5} ${topY + 6.4}c-.4-6.2 3.4-9 ${jaw + 0.5} -9s${jaw + 0.9} 2.8 ${jaw + 0.5} 9c-1-3.6-4-5.4-${jaw + 0.5}-5.4s-${jaw - 0.5} 1.8-${jaw + 0.5} 5.4z" fill="${c}"/>`,
+    `<ellipse cx="${cx}" cy="${topY + 2.6}" rx="${jaw + 1.4}" ry="5.4" fill="${c}"/>`,
+    `<path d="M${cx - jaw - 1.4} ${topY + 9}c-1-8 3.6-11.4 ${jaw + 1.4} -11.4s${jaw + 2.4} 3.4 ${jaw + 1.4} 11.4c-.6-5-3.6-7-${jaw + 1.4}-7s-${jaw - 0.8} 2-${jaw + 1.4} 7z" fill="${c}"/>`,
+    '',                                          // shaved or bald: the skull carries it
+  ][crop];
+
+  const neck = `<path d="M${cx - 2.6} ${chinY - 1.4}h5.2v4.6h-5.2z" fill="${c}" opacity=".82"/>`;
+  const body = `<path d="M${cx} ${chinY + 2.8}c-${shoulder} 0-${shoulder + 1.4} 5.6-${shoulder + 1.4} 11.6h${(shoulder + 1.4) * 2}c0-6-1.4-11.6-${shoulder + 1.4}-11.6z" fill="${c}"/>`;
+  // a collar notch, so the shoulders read as a person in uniform rather than a hill
+  const collar = `<path d="M${cx - 3.4} ${chinY + 3}l3.4 4.4 3.4-4.4 1.6 1.2-5 6-5-6z" fill="${mix(c, '#000000', 0.45)}" opacity=".55"/>`;
+
+  return `<g opacity=".78">${body}${collar}${neck}${head}${hair}</g>`;
+}
+
 function dossier(rng: Rng, o: ArtOptions): string {
   const p = o.theme.palette;
   const flagged = o.state === 1;
@@ -391,9 +428,8 @@ function dossier(rng: Rng, o: ArtOptions): string {
     <rect x="6" y="6" width="88" height="12" fill="${c}" opacity=".16"/>
     <rect x="10" y="10" width="26" height="4" rx="2" fill="${c}" opacity=".8"/>
     ${[26, 46, 66].map((y) => `<circle cx="4" cy="${y}" r="2.2" fill="${p.bg}"/>`).join('')}
-    <rect x="10" y="24" width="28" height="34" fill="${mix(c, '#000000', 0.55)}" opacity=".5"/>
-    <circle cx="24" cy="36" r="7" fill="${c}" opacity=".7"/>
-    <path d="M24 45c-7 0-11 5-12 13h24c-1-8-5-13-12-13z" fill="${c}" opacity=".7"/>
+    <rect x="10" y="24" width="28" height="34" fill="${mix(c, '#000000', 0.62)}" opacity=".55"/>
+    ${silhouette(rng, c)}
     <rect x="10" y="24" width="28" height="34" fill="url(#halftone)" opacity=".2"/>
     <rect x="10" y="24" width="28" height="34" fill="none" stroke="${dim}" stroke-width="0.8"/>
     ${lines}

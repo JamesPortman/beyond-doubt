@@ -67,6 +67,10 @@ export interface Store {
   joinRoom(roomId: string, userId: string, playId: string, now: number): Promise<void>;
   touchMember(roomId: string, userId: string, focusCell: number | null, now: number): Promise<void>;
   roomPresence(roomId: string): Promise<RoomMemberRow[]>;
+  /** operator settings, JSON-encoded. One row per key. */
+  getSetting(key: string): Promise<string | undefined>;
+  putSetting(key: string, value: string, now: number): Promise<void>;
+  settingUpdatedAt(key: string): Promise<number | null>;
   /** create tables if they are missing */
   migrate(): Promise<void>;
   close(): Promise<void>;
@@ -119,7 +123,26 @@ export class SqliteStore implements Store {
         focus_cell INTEGER, joined_at INTEGER NOT NULL, last_seen INTEGER NOT NULL,
         PRIMARY KEY (room_id, user_id));
       CREATE INDEX IF NOT EXISTS room_members_room ON room_members(room_id);
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `);
+  }
+
+  /* ---------- operator settings ---------- */
+
+  async getSetting(key: string): Promise<string | undefined> {
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value?: string } | undefined;
+    return r?.value;
+  }
+  async putSetting(key: string, value: string, now: number): Promise<void> {
+    this.db.prepare(
+      `INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ).run(key, value, now);
+  }
+  async settingUpdatedAt(key: string): Promise<number | null> {
+    const r = this.db.prepare('SELECT updated_at FROM settings WHERE key = ?').get(key) as { updated_at?: number } | undefined;
+    return r?.updated_at ?? null;
   }
 
   /* ---------- users + auth ---------- */

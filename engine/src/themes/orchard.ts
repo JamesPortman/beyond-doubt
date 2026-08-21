@@ -21,7 +21,7 @@ export const orchard: Theme = {
   strings: {
     en: {
       title: 'The Orchard',
-      tagline: 'Sixteen trees on a concession road. Something is moving through them.',
+      tagline: 'Sixteen trees on a concession road. A blight is moving through them.',
       tile: noun('tree', 'trees', 'm'),
       states: {
         a: { name: 'Clean', collective: noun('clean tree', 'clean trees', 'm'), adj: predInv('healthy', 'healthy'), pred: predInv('is clean', 'are clean') },
@@ -37,7 +37,7 @@ export const orchard: Theme = {
     },
     pt: {
       title: 'O Pomar',
-      tagline: 'Dezesseis árvores na estrada vicinal. Alguma coisa está passando por elas.',
+      tagline: 'Dezesseis árvores na estrada vicinal. Uma praga está passando por elas.',
       tile: noun('árvore', 'árvores', 'f'),
       states: {
         a: { name: 'Sadia', collective: noun('árvore sadia', 'árvores sadias', 'f'), adj: pred('sadio', 'sadia', 'sadios', 'sadias'), pred: pred('está sadio', 'está sadia', 'estão sadios', 'estão sadias') },
@@ -53,7 +53,7 @@ export const orchard: Theme = {
     },
     es: {
       title: 'El Huerto',
-      tagline: 'Dieciséis árboles junto al camino. Algo se mueve entre ellos.',
+      tagline: 'Dieciséis árboles junto al camino. Una plaga se mueve entre ellos.',
       tile: noun('árbol', 'árboles', 'm'),
       states: {
         a: { name: 'Sano', collective: noun('árbol sano', 'árboles sanos', 'm'), adj: pred('sano', 'sana', 'sanos', 'sanas'), pred: pred('está sano', 'está sana', 'están sanos', 'están sanas') },

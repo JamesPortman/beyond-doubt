@@ -308,6 +308,9 @@ test('a theme backed by real artwork deals pictures without repeating', () => {
   assert.ok(!tileArt({ theme: withArt, index: 0, labelSeed: puzzle.labelSeed, state: 0 }).includes('tile-overlay'));
   assert.equal(/src="([^"]+)"/.exec(marked)?.[1], srcOf(0), 'and the same picture underneath');
 
-  // a theme with no set still draws
-  assert.ok(tileArt({ theme: base, index: 0, labelSeed: puzzle.labelSeed }).startsWith('<svg'));
+  // a theme with no set still draws — picked by that property, not by name, so wiring a
+  // real image set onto another theme cannot quietly turn this assertion into a tautology
+  const drawn = THEMES.find((t) => !t.images);
+  assert.ok(drawn, 'at least one theme should still be drawn rather than photographed');
+  assert.ok(tileArt({ theme: drawn, index: 0, labelSeed: puzzle.labelSeed }).startsWith('<svg'));
 });

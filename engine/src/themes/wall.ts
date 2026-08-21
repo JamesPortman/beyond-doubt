@@ -1,4 +1,5 @@
 import { Theme } from './index.js';
+import { GALLERY_IMAGES } from './gallery.js';
 import { noun, pred, predInv } from '../i18n/index.js';
 
 export const wall: Theme = {
@@ -7,6 +8,9 @@ export const wall: Theme = {
   tagSchema: { dealer: ['bruhn', 'marchetti', 'okonkwo', 'estate'] },
   artKind: 'painting',
   skinClass: 'skin-wall',
+  // Same twenty-one works as Red Dot, but this theme numbers its tiles as lots, so no
+  // clue ever says a named painting of James's is a forgery — the fiction stays anonymous.
+  images: { ...GALLERY_IMAGES, title: undefined, mark: 'fade' },
   palette: {
     mood: 'light',
     bg: '#efece5', surface: '#f8f6f0', surfaceAlt: '#fdfcf8',
@@ -27,7 +31,7 @@ export const wall: Theme = {
       tags: {
         dealer: {
           label: noun('provenance', 'provenances', 'f'),
-          values: { bruhn: noun('Bruhn picture', 'Bruhn pictures', 'm'), marchetti: noun('Marchetti picture', 'Marchetti pictures', 'm'), okonkwo: noun('Okonkwo picture', 'Okonkwo pictures', 'm'), estate: noun('estate picture', 'estate pictures', 'm') },
+          values: { bruhn: noun('Bruhn', 'Bruhn pictures', 'm'), marchetti: noun('Marchetti', 'Marchetti pictures', 'm'), okonkwo: noun('Okonkwo', 'Okonkwo pictures', 'm'), estate: noun('estate lot', 'estate pictures', 'm') },
         },
       },
       labels: [],
@@ -43,7 +47,7 @@ export const wall: Theme = {
       tags: {
         dealer: {
           label: noun('procedência', 'procedências', 'f'),
-          values: { bruhn: noun('quadro Bruhn', 'quadros Bruhn', 'm'), marchetti: noun('quadro Marchetti', 'quadros Marchetti', 'm'), okonkwo: noun('quadro Okonkwo', 'quadros Okonkwo', 'm'), estate: noun('quadro do espólio', 'quadros do espólio', 'm') },
+          values: { bruhn: noun('Bruhn', 'quadros Bruhn', 'm'), marchetti: noun('Marchetti', 'quadros Marchetti', 'm'), okonkwo: noun('Okonkwo', 'quadros Okonkwo', 'm'), estate: noun('espólio', 'quadros do espólio', 'm') },
         },
       },
       labels: [],
@@ -59,7 +63,7 @@ export const wall: Theme = {
       tags: {
         dealer: {
           label: noun('procedencia', 'procedencias', 'f'),
-          values: { bruhn: noun('cuadro Bruhn', 'cuadros Bruhn', 'm'), marchetti: noun('cuadro Marchetti', 'cuadros Marchetti', 'm'), okonkwo: noun('cuadro Okonkwo', 'cuadros Okonkwo', 'm'), estate: noun('cuadro de la herencia', 'cuadros de la herencia', 'm') },
+          values: { bruhn: noun('Bruhn', 'cuadros Bruhn', 'm'), marchetti: noun('Marchetti', 'cuadros Marchetti', 'm'), okonkwo: noun('Okonkwo', 'cuadros Okonkwo', 'm'), estate: noun('herencia', 'cuadros de la herencia', 'm') },
         },
       },
       labels: [],
