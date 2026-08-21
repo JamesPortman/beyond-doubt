@@ -32,28 +32,27 @@ const WORKS: { title: string; full: string; oil: boolean }[] = [
   { title: 'The Summit', full: 'Top of Blue Mountain', oil: false },
 ];
 
-/** The image set itself, shared with The Wall. Only the caption and the mark differ:
- *  Red Dot titles each work and puts a sold dot beside it; The Wall numbers them as
- *  anonymous lots and stamps the ones its story says are fake. */
-export const GALLERY_IMAGES = {
-  count: WORKS.length,
-  src: (n: number) => `/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
-  credit: (n: number) => {
-    const w = WORKS[n];
-    const medium = `James Portman, ${w.oil ? 'oil on canvas' : 'photograph'}`;
-    // The full title only earns a repeat when the tile had to shorten it.
-    return w.full === w.title ? medium : `${w.full} — ${medium}`;
-  },
-  fixedCast: true,
-} as const;
-
 export const gallery: Theme = {
   id: 'gallery',
   labelMode: 'artwork',
   tagSchema: { size: ['small', 'medium', 'large', 'study'] },
   artKind: 'painting',
   skinClass: 'skin-gallery',
-  images: { ...GALLERY_IMAGES, title: (n) => WORKS[n].title, mark: 'dot' },
+  images: {
+    count: WORKS.length,
+    src: (n) => `/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
+    title: (n) => WORKS[n].title,
+    credit: (n) => {
+      const w = WORKS[n];
+      const medium = `James Portman, ${w.oil ? 'oil on canvas' : 'photograph'}`;
+      // The full title only earns a repeat when the tile had to shorten it.
+      return w.full === w.title ? medium : `${w.full} — ${medium}`;
+    },
+    // A red dot beside the lot is what the room actually does when something sells, and
+    // it is the only mark in the set that leaves the picture itself alone.
+    mark: 'dot',
+    fixedCast: true,
+  },
   palette: {
     mood: 'light',
     bg: '#efece6', surface: '#faf8f4', surfaceAlt: '#ffffff',
@@ -68,8 +67,8 @@ export const gallery: Theme = {
   },
   strings: {
     en: {
-      title: 'Red Dot',
-      tagline: 'Opening night on Georgian Bay. Work out which ones already have a buyer.',
+      title: 'Auction Night',
+      tagline: 'Auction night on Georgian Bay. Work out which lots have already gone.',
       tile: noun('work', 'works', 'f'),
       states: {
         a: { name: 'Available', collective: noun('available work', 'available works', 'f'), adj: predInv('available', 'available'), pred: predInv('is available', 'are available') },
@@ -89,8 +88,8 @@ export const gallery: Theme = {
       labels: [],
     },
     pt: {
-      title: 'Ponto Vermelho',
-      tagline: 'Noite de abertura na Baía Georgiana. Descubra quais já têm comprador.',
+      title: 'Noite de Leilão',
+      tagline: 'Noite de leilão na Baía Georgiana. Descubra quais lotes já foram vendidos.',
       tile: noun('obra', 'obras', 'f'),
       states: {
         a: { name: 'Disponível', collective: noun('obra disponível', 'obras disponíveis', 'f'), adj: predInv('disponível', 'disponíveis'), pred: predInv('está disponível', 'estão disponíveis') },
@@ -110,8 +109,8 @@ export const gallery: Theme = {
       labels: [],
     },
     es: {
-      title: 'Punto Rojo',
-      tagline: 'Noche de inauguración en la bahía Georgian. Averigua cuáles ya tienen comprador.',
+      title: 'Noche de Subasta',
+      tagline: 'Noche de subasta en la bahía Georgian. Averigua qué lotes ya se vendieron.',
       tile: noun('obra', 'obras', 'f'),
       states: {
         a: { name: 'Disponible', collective: noun('obra disponible', 'obras disponibles', 'f'), adj: predInv('disponible', 'disponibles'), pred: predInv('está disponible', 'están disponibles') },

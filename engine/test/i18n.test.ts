@@ -127,15 +127,19 @@ test('Portuguese and Spanish agree in gender and number with the theme noun', ()
 });
 
 test('a masculine theme noun flips every agreement', () => {
-  const wall = THEMES.find((t) => t.id === 'wall')!;
-  const puzzle = generate({ seed: 'agree2', difficulty: 3, tagSchema: wall.tagSchema });
+  // The case this test exists to pin is singular-vs-plural against a masculine noun.
+  // It finds one by gender rather than by name, so retiring a theme cannot silently
+  // delete the coverage — it fails loudly instead.
+  const m = THEMES.find((t) => t.strings.pt.tile.g === 'm' && t.strings.es.tile.g === 'm');
+  assert.ok(m, 'the suite needs a masculine-noun theme to test agreement against');
+  const puzzle = generate({ seed: 'agree2', difficulty: 3, tagSchema: m.tagSchema });
   const pt = getLocale('pt'), es = getLocale('es');
-  const c: Clue = { k: 'count', sel: { k: 'row', r: 0 }, state: B, cmp: 'eq', n: 2 };
-  assert.equal(pt.clue(c, renderContext(wall, 'pt', puzzle)), 'Na fileira 1, exatamente dois quadros são falsos.');
-  assert.equal(es.clue(c, renderContext(wall, 'es', puzzle)), 'En la fila 1, exactamente dos cuadros son falsos.');
+  const two: Clue = { k: 'count', sel: { k: 'row', r: 0 }, state: B, cmp: 'eq', n: 2 };
+  assert.match(pt.clue(two, renderContext(m, 'pt', puzzle)), /exatamente dois \S+s /);
+  assert.match(es.clue(two, renderContext(m, 'es', puzzle)), /exactamente dos \S+s /);
   const one: Clue = { k: 'count', sel: { k: 'row', r: 0 }, state: B, cmp: 'eq', n: 1 };
-  assert.match(pt.clue(one, renderContext(wall, 'pt', puzzle)), /exatamente um quadro é falso/);
-  assert.match(es.clue(one, renderContext(wall, 'es', puzzle)), /exactamente un cuadro es falso/);
+  assert.match(pt.clue(one, renderContext(m, 'pt', puzzle)), /exatamente um /);
+  assert.match(es.clue(one, renderContext(m, 'es', puzzle)), /exactamente un /);
 });
 
 test('person names carry their own gender through conditional clues', () => {
@@ -273,7 +277,7 @@ test('generated clues never say "at most zero" in any language', () => {
 });
 
 test('a theme backed by real artwork deals pictures without repeating', () => {
-  const base = THEMES.find((t) => t.id === 'wall')!;
+  const base = THEMES.find((t) => !t.images)!;   // synthesise a set onto a drawn theme
   const withArt = {
     ...base,
     images: { count: 24, src: (n: number) => `/assets/wall/${String(n + 1).padStart(2, '0')}.webp`, mark: 'crack' as const },

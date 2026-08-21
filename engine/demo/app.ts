@@ -30,12 +30,12 @@ const THEME_IDS = allThemes().map((t) => t.id);
 const LOCAL_ID = 'you';
 
 interface Prefs { themeId: string; locale: LocaleCode; mode: Mode; players: number; }
-const DEFAULTS: Prefs = { themeId: 'wall', locale: 'en', mode: 'daily', players: 1 };
+const DEFAULTS: Prefs = { themeId: 'gallery', locale: 'en', mode: 'daily', players: 1 };
 const loadPrefs = (): Prefs => {
-  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs.v3') ?? '{}') }; }
+  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs.v4') ?? '{}') }; }
   catch { return { ...DEFAULTS }; }
 };
-const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs.v3', JSON.stringify(p)); } catch { /* ignore */ } };
+const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs.v4', JSON.stringify(p)); } catch { /* ignore */ } };
 
 const localBoard = new LocalLeaderboard();
 

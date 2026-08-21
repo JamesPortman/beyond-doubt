@@ -46,7 +46,7 @@ for (const lang of ['en','pt','es']){
 }
 // theme sweep with screenshots
 const themeCount = await p.$$eval('#themes .theme-card', n=>n.length);
-const ids = ['guestlist','orchard','coldopen','callboard','wall','record','plate19'];
+const ids = ['gallery','guestlist','orchard','coldopen','callboard','record','plate19'];
 for (let i=0;i<themeCount;i++){
   await p.click(`#themes .theme-card:nth-child(${i+1})`);
   await p.waitForTimeout(420);

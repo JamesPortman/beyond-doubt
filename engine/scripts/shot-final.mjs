@@ -17,7 +17,7 @@ for (let i=0;i<7;i++){
 }
 await p.click('#board .cell:nth-child(3)', {button:'right'}); await p.waitForTimeout(120);
 await p.screenshot({path:'shots/final-orchard.png'});
-const games = ['guestlist','callboard','wall','record','plate19','coldopen'];
+const games = ['gallery','guestlist','callboard','record','plate19','coldopen'];
 for (const g of games){
   await p.selectOption('#game', g); await p.waitForTimeout(450);
   await p.screenshot({path:`shots/final-${g}.png`, clip:{x:60,y:330,width:640,height:700}});
