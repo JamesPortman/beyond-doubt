@@ -14,6 +14,7 @@ export * from './themes/index.js';
 export * from './themes/all.js';
 export * from './render/skin.js';
 export * from './render/art.js';
+export * from './render/deal.js';
 export * from './render/settings.js';
 export * from './net/protocol.js';
 export * from './net/client.js';

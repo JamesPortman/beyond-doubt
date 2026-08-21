@@ -2,6 +2,7 @@ import { LocaleCode, ThemeLocale, LabelSpec, Locale, RenderContext } from '../i1
 import { Clue } from '../core/clue.js';
 import { PuzzleView } from '../core/generate.js';
 import { Rng, makeRng } from '../core/rng.js';
+import { dealFor } from '../render/deal.js';
 
 export interface Palette {
   mood: 'light' | 'dark';
@@ -17,8 +18,23 @@ export interface Palette {
 
 export interface Fonts { display: string; body: string; mono: string; }
 
-export type LabelMode = 'name' | 'coord' | 'numbered' | 'title';
+export type LabelMode = 'name' | 'coord' | 'numbered' | 'title' | 'artwork';
 export type ArtKind = 'portrait' | 'tree' | 'painting' | 'dossier' | 'starfield' | 'frame';
+
+export interface ThemeImages {
+  /** how many files the set contains */
+  count: number;
+  /** file for image n (0-based), e.g. n => `/assets/wall/${String(n + 1).padStart(2, '0')}.webp` */
+  src: (n: number) => string;
+  /** optional per-image credit line, shown in Inspect */
+  credit?: (n: number) => string;
+  /** how the marked state is shown over a photograph, since it cannot be redrawn */
+  mark: 'cross' | 'fade' | 'crack' | 'stamp' | 'ring' | 'dot';
+  /** the work's real title, for themes that label tiles with what the picture is */
+  title?: (n: number) => string;
+  /** true when the set is a fixed cast that may repeat across boards */
+  fixedCast?: boolean;
+}
 
 export interface Theme {
   id: string;
@@ -29,6 +45,9 @@ export interface Theme {
   fonts: Fonts;
   /** which procedural illustration this theme's tiles use */
   artKind: ArtKind;
+  /** Real artwork for this theme's tiles. When present it replaces the drawing entirely
+   *  and the procedural version becomes the fallback for anything the set does not cover. */
+  images?: ThemeImages;
   /** portraits only: render as a high-contrast photocopy rather than in colour */
   artMono?: boolean;
   /** extra class hook for skin CSS */
@@ -66,6 +85,17 @@ export function resolveLabels(theme: Theme, locale: LocaleCode, puzzle: PuzzleVi
         out.push({ text: `${s.labelPrefix ?? ''}${s.labelPrefix ? ' ' : ''}${i + 1}`, g: tileG });
       }
       return out;
+    // The picture on the tile has a name of its own. Take it from the same deal the
+    // art layer used, so the label under a painting is that painting's title.
+    case 'artwork': {
+      const set = theme.images;
+      if (!set?.title) return resolveLabels({ ...theme, labelMode: 'numbered' }, locale, puzzle);
+      const order = dealFor(puzzle.labelSeed, set.count);
+      for (let i = 0; i < puzzle.n; i++) {
+        out.push({ text: set.title(order[i % set.count]), g: tileG });
+      }
+      return out;
+    }
     case 'name':
     case 'title': {
       // deterministic per (puzzle, locale) so two players on the same board see the same names

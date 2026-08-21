@@ -99,7 +99,7 @@ export class MemoryLeaderboard implements LeaderboardStore {
 /** Browser-local board. Storage can be unavailable or wiped, so every access is guarded
  *  and failure degrades to an in-memory board rather than breaking play. */
 export class LocalLeaderboard extends MemoryLeaderboard {
-  constructor(private key = 'clues.leaderboard.v1') {
+  constructor(private key = 'clues.leaderboard.v2') {
     super();
     try {
       const raw = globalThis.localStorage?.getItem(key);

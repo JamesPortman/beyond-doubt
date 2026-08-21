@@ -4,11 +4,11 @@ import {
   Session, State, bits, PuzzleView, PlacedClue,
   scoreRun, formatDuration,
   dailyEdition, weeklyEdition, freeEdition, buildPuzzle, EditionRef, isoDate,
-  LocalLeaderboard, entryFrom, makeRng,
+  LocalLeaderboard, entryFrom,
   Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay,
   tileArt, ART_DEFS,
   Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
-  termsForClue, TermId,
+  termsForClue, TermId, dealFor,
 } from '../src/index.js';
 
 type Mode = 'daily' | 'weekly' | 'free' | 'split' | 'room' | 'archive';
@@ -30,27 +30,14 @@ const THEME_IDS = allThemes().map((t) => t.id);
 const LOCAL_ID = 'you';
 
 interface Prefs { themeId: string; locale: LocaleCode; mode: Mode; players: number; }
-const DEFAULTS: Prefs = { themeId: 'orchard', locale: 'en', mode: 'daily', players: 1 };
+const DEFAULTS: Prefs = { themeId: 'guestlist', locale: 'en', mode: 'daily', players: 1 };
 const loadPrefs = (): Prefs => {
-  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs') ?? '{}') }; }
+  try { return { ...DEFAULTS, ...JSON.parse(globalThis.localStorage?.getItem('clues.prefs.v2') ?? '{}') }; }
   catch { return { ...DEFAULTS }; }
 };
-const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs', JSON.stringify(p)); } catch { /* ignore */ } };
+const savePrefs = (p: Prefs) => { try { globalThis.localStorage?.setItem('clues.prefs.v2', JSON.stringify(p)); } catch { /* ignore */ } };
 
 const localBoard = new LocalLeaderboard();
-
-/** Offline only: deterministic rivals so a local board is not an empty table.
- *  Online, every row is a real result the server verified. */
-function seedRivals(ref: EditionRef) {
-  const rng = makeRng(`rivals|${ref.id}`);
-  const names = ['mira_k', 'joão.p', 'Ana Luísa', 'tomas', 'K. Osei', 'lucia', 'Rui', 'nadia88'];
-  return rng.shuffle(names).slice(0, 6).map((n, i) => {
-    const hints = rng.int(3), mistakes = rng.int(2);
-    const timeMs = Math.round((40 + rng.int(300) + i * 18) * 1000);
-    return entryFrom(ref, `bot:${n}`, n, 'en', timeMs, hints, mistakes,
-      scoreRun({ difficulty: ref.difficulty, elapsedMs: timeMs, hintsUsed: hints, mistakes }), 1);
-  });
-}
 
 class App {
   prefs = loadPrefs();
@@ -248,7 +235,6 @@ class App {
       players: this.prefs.mode === 'split' ? this.playerCount : 1,
       hintBudget: 3,
     });
-    for (const r of seedRivals(ref)) void localBoard.submit(r);
   }
 
   applySkin() {
@@ -568,8 +554,13 @@ class App {
       || (this.settings.showTimer === 'onSolve' && this.session.solved);
     $('#time').textContent = showTime ? formatDuration(ms) : '—';
     $('#timeL').textContent = this.ui.timeLabel;
-    $('#mist').textContent = String(this.online ? this.mistakes : s.mistakes);
+    const mistakes = this.online ? this.mistakes : s.mistakes;
+    $('#mist').textContent = mistakes > 0 ? `${mistakes} (+${mistakes}:00)` : '0';
+    // The counter only tells you the cost after you have paid it, so the rule is
+    // spelled out under the label from the start.
     $('#mistL').textContent = this.ui.mistakes;
+    $('#mistL').title = this.ui.mistakeCost;
+    $('#mistCost').textContent = this.ui.mistakeCost;
     $('#hints').textContent = String(this.online ? this.hintsUsed : s.hintsUsed);
     $('#hintsL').textContent = this.ui.hintsUsed;
     $('#prog').textContent = `${s.revealed}/${s.total}`;
@@ -694,7 +685,7 @@ class App {
     const dates: string[] = [];
     for (let i = 0; i < 30; i++) dates.push(isoDate(new Date(Date.now() - i * 86400000)));
     this.showResult({
-      editionId: this.edition.id, timeMs: s.elapsedMs, hintsUsed: s.hintsUsed,
+      editionId: this.edition.id, timeMs: s.elapsedMs, timeAddedMs: res.timeAddedMs, hintsUsed: s.hintsUsed,
       mistakes: s.mistakes, score: res.score, perfect: res.perfect,
       ranked: false, rank: null, streak: await localBoard.streak(LOCAL_ID, dates),
     });
@@ -706,6 +697,10 @@ class App {
     const card = el('div', 'result');
     card.appendChild(el('h2', '', this.ui.solved));
     card.appendChild(el('p', 'big', `${this.ui.solvedIn} ${formatDuration(r.timeMs)}`));
+    if (r.timeAddedMs > 0) {
+      card.appendChild(el('p', 'penalty',
+        `+${formatDuration(r.timeAddedMs)} ${this.ui.timePenalty} → ${this.ui.adjustedTime} ${formatDuration(r.timeMs + r.timeAddedMs)}`));
+    }
     card.appendChild(el('p', 'score', `${this.ui.scoreLabel} ${r.score}`));
     if (r.rank) card.appendChild(el('p', 'perfect', `${this.ui.rank} ${r.rank}`));
     if (r.perfect) card.appendChild(el('p', 'perfect', this.ui.perfect));
@@ -1001,6 +996,13 @@ class App {
     } else if (this.inspectCell !== null) {
       const cell = this.inspectCell;
       panel.appendChild(el('p', 'insp-clue', ctx.labels[cell].text));
+      // When the tile is a real work rather than a drawing, inspecting it should say
+      // whose it is and what it is made of, the way a wall label does.
+      const imgs = this.theme.images;
+      if (imgs?.credit) {
+        const n = dealFor(this.session.puzzle.labelSeed, imgs.count)[cell % imgs.count];
+        panel.appendChild(el('p', 'insp-credit', imgs.credit(n)));
+      }
       panel.appendChild(el('h3', 'insp-head', I.mentions));
       const hits = this.session.activeClues().filter((pc) => this.session.touches(pc.clue).includes(cell));
       if (!hits.length) panel.appendChild(el('p', 'insp-body', I.nothing));

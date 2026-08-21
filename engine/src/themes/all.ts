@@ -6,7 +6,8 @@ import { orchard } from './orchard.js';
 import { plate19 } from './plate19.js';
 import { coldopen } from './coldopen.js';
 import { guestlist } from './guestlist.js';
+import { gallery } from './gallery.js';
 
-export const THEMES: Theme[] = [guestlist, orchard, coldopen, callboard, wall, record, plate19];
+export const THEMES: Theme[] = [guestlist, gallery, orchard, coldopen, callboard, wall, record, plate19];
 for (const t of THEMES) registerTheme(t);
-export { guestlist, callboard, wall, record, orchard, plate19, coldopen };
+export { guestlist, gallery, callboard, wall, record, orchard, plate19, coldopen };

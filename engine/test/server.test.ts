@@ -1,3 +1,4 @@
+import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GameServer } from '../src/net/server.js';
@@ -276,7 +277,7 @@ test('every theme is playable through the server', async () => {
   const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
   const { token } = await signIn(srv, 'a@b.co');
   const today = await srv.today();
-  assert.equal(today.editions.length, 7);
+  assert.equal(today.editions.length, THEMES.length);
   for (const ed of today.editions) {
     const s = await srv.start(await userOf(srv, token), { mode: 'daily', themeId: ed.themeId });
     const r = await playHonestly(srv, token, s.playId, s.view, 500, clk);
@@ -466,4 +467,14 @@ test('health checks the things that actually break', async () => {
   assert.equal(h.db, true, 'the database answered');
   assert.equal(h.generator, true, 'and a board could be generated');
   assert.ok(h.uptimeMs >= 0);
+});
+
+test('a sign-in code that could not be delivered fails loudly', async () => {
+  const srv = await makeServer({
+    now: () => new Date('2026-08-20T12:00:00Z').getTime(),
+    dev: false,
+    sendEmail: async () => { throw new Error('provider rejected the message'); },
+  });
+  // The player must see a failed request, not a cheerful "sent" for a mail that never left.
+  await assert.rejects(srv.authRequest({ email: 'a@b.co' }), /provider rejected/);
 });

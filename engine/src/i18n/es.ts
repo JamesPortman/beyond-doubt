@@ -194,6 +194,8 @@ export const es: Locale = {
     splitClues: 'Pistas repartidas', yourClues: 'Tus pistas', playerN: 'Jugador',
     perfect: 'Perfecto — sin pistas, sin errores', solvedIn: 'Resuelto en', weeklyTotal: 'Total semanal',
     complete: 'Completo',
+    timePenalty: 'añadido por errores', adjustedTime: 'Tiempo ajustado',
+    mistakeCost: '+1:00 cada',
     actions: {
       clearTags: 'Borrar marcas', inspect: 'Inspeccionar', showHint: 'Ver pista', settings: 'Ajustes',
       playTutorial: 'Ver tutorial', shareScenario: 'Compartir escenario',
@@ -205,7 +207,7 @@ export const es: Locale = {
       steps: [
         'Cada ficha esconde uno de dos estados. Tu tarea es deducir cuál — nunca adivinar.',
         'Empieza por las pistas de la derecha. Toda pista es verdadera, incluidas las que vienen de una ficha en el estado marcado. Aquí nadie miente.',
-        'Una ficha con un punto en la esquina ya está decidida por las pistas que tienes. Elige la etiqueta correcta encima del tablero y haz clic en ella.',
+        'Una ficha con un punto en la esquina ya está decidida por las pistas que tienes. Elige la etiqueta correcta encima del tablero y haz clic en ella. Elegir la etiqueta equivocada es el único error posible aquí, y suma un minuto a tu tiempo.',
         'Resolver una ficha libera lo que esa ficha sabía, así que la lista de pistas crece conforme avanzas. Ese es todo el ciclo.',
         'Prueba a hacer clic en una ficha sin punto. El tablero lo rechaza, porque nada la obliga todavía. Ese rechazo es la promesa: nunca se te pide adivinar.',
         'Haz clic derecho para dejar una anotación, y usa Inspeccionar cuando la palabra exacta de una pista importe. Eso es todo — ve a terminarlo.',

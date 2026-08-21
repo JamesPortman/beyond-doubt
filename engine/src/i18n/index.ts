@@ -167,6 +167,8 @@ export interface UiStrings {
   theme: string; language: string; newGame: string; restart: string;
   splitClues: string; yourClues: string; playerN: string;
   perfect: string; solvedIn: string; weeklyTotal: string; complete: string;
+  timePenalty: string;
+  mistakeCost: string; adjustedTime: string;
   settings: SettingsStrings;
   inspect: InspectStrings;
   actions: ActionStrings;

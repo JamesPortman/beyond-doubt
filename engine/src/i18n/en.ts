@@ -178,6 +178,8 @@ export const en: Locale = {
     splitClues: 'Split clues', yourClues: 'Your clues', playerN: 'Player',
     perfect: 'Perfect — no hints, no mistakes', solvedIn: 'Solved in', weeklyTotal: 'Weekly total',
     complete: 'Complete',
+    timePenalty: 'added for mistakes', adjustedTime: 'Adjusted time',
+    mistakeCost: '+1:00 each',
     actions: {
       clearTags: 'Clear tags', inspect: 'Inspect', showHint: 'Show hint', settings: 'Settings',
       playTutorial: 'Play tutorial', shareScenario: 'Share scenario',
@@ -189,7 +191,7 @@ export const en: Locale = {
       steps: [
         'Every tile is hiding one of two states. Your job is to work out which — never to guess.',
         'Start from the clues on the right. Every clue is true, including clues that come from a tile in the marked state. Nobody lies here.',
-        'A tile with a dot in its corner is already decided by the clues you hold. Pick the right label above the board and click one.',
+        'A tile with a dot in its corner is already decided by the clues you hold. Pick the right label above the board and click one. Picking the wrong label is the only mistake this game lets you make, and it adds a minute to your time.',
         'Solving a tile releases whatever that tile knew, so the clue list grows as you go. That is the whole loop.',
         'Try clicking a tile with no dot. The board refuses, because nothing forces it yet. That refusal is the promise: you are never asked to guess.',
         'Right-click a tile to leave a pencil mark, and use Inspect when a clue is doing something exact with its wording. That is everything — go and finish it.',

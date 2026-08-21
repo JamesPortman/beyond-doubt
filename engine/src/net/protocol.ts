@@ -68,6 +68,8 @@ export interface HintResult { hint: Hint; hintsUsed: number; remaining: number; 
 export interface RunResult {
   editionId: string;
   timeMs: number;
+  /** milliseconds added by mistakes — shown to the player so the cost is visible */
+  timeAddedMs: number;
   hintsUsed: number;
   mistakes: number;
   score: number;

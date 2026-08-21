@@ -49,6 +49,8 @@
   /* inspect */
   #inspect .insp-clue{margin:0 0 13px;font-size:1rem;font-weight:600;line-height:1.4;
     padding-left:10px;border-left:2px solid var(--accent)}
+  #inspect .insp-credit{margin:-9px 0 13px;padding-left:10px;font-size:.84rem;
+    color:var(--ink-soft);font-style:italic}
   #inspect .insp-head{font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;
     color:var(--ink-soft);margin:14px 0 6px;font-weight:700}
   #inspect .insp-body{margin:0;font-size:.94rem;line-height:1.55;color:var(--ink)}
@@ -91,6 +93,7 @@
   .day.done{background:color-mix(in srgb, var(--state-a) 22%, transparent)}
 
   #brush{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+  .stat-note{display:block;font-size:.62rem;white-space:nowrap;letter-spacing:.02em;color:var(--ink-soft);opacity:.8;margin-top:1px}
   .brush-label{font-size:.82rem;color:var(--ink-soft);letter-spacing:.06em;text-transform:uppercase}
   .chip.s0.on{background:var(--state-a);border-color:var(--state-a)}
   .chip.s1.on{background:var(--state-b);border-color:var(--state-b)}
@@ -106,6 +109,10 @@
   .cell:hover{transform:translateY(-2px)}
   .art{position:absolute;inset:0;display:block}
   .art .tile-art{width:100%;height:100%;display:block}
+  /* real artwork fills the tile the same way the drawing does */
+  .tile-photo{position:absolute;inset:0;display:block;background:var(--tile)}
+  .tile-photo img{width:100%;height:100%;object-fit:cover;display:block;user-select:none}
+  .tile-photo .tile-overlay{position:absolute;inset:0}
   .cap{
     position:absolute;left:0;right:0;bottom:0;display:flex;flex-direction:column;gap:0;
     padding:6px 8px 7px;background:color-mix(in srgb, var(--tile-ink) 90%, transparent);
@@ -116,10 +123,20 @@
   .cell-name{font-size:.95rem;font-weight:800;line-height:1.12;letter-spacing:.055em;
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
     font-family:var(--font-body);text-shadow:0 1px 2px rgba(0,0,0,.45)}
-  body:not([data-label-mode="title"]) .cell-name{text-transform:uppercase}
+  body:not([data-label-mode="title"]):not([data-label-mode="artwork"]) .cell-name{text-transform:uppercase}
   .cell-tag{display:block;font-size:.72rem;letter-spacing:.005em;text-transform:none;opacity:.78;
     font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px}
   .cell-tag::first-letter{text-transform:uppercase}
+  /* A work's title is a real title, not a first name: it can run to two words and it has
+     to stay legible on a four-across phone board, so it wraps rather than truncating. */
+  body[data-label-mode="artwork"] .cell-name{
+    font-size:.72rem;letter-spacing:-.005em;line-height:1.15;white-space:normal;text-shadow:none;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-clamp:2}
+  body[data-label-mode="artwork"] .cell-tag{font-size:.64rem;opacity:.7}
+  /* Over a photograph a translucent caption is unreadable, and a gallery does not print
+     its labels on the painting anyway: this is the card under the picture. */
+  body[data-label-mode="artwork"] .cap{
+    padding:4px 5px 5px;background:var(--tile-ink);backdrop-filter:none}
   .cell-state{
     position:absolute;top:7px;right:var(--tag-right,7px);left:var(--tag-left,auto);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;
     padding:3px 7px;border-radius:3px;background:var(--tile-ink);color:var(--tile);font-weight:700
@@ -248,6 +265,7 @@
   .result h2{font-family:var(--font-display);margin:0 0 8px;font-size:26px}
   .result .big{font-size:1.05rem;margin:0 0 4px}
   .result .score{font-size:30px;font-weight:800;margin:6px 0;font-variant-numeric:tabular-nums}
+  .result .penalty{color:var(--state-b);font-size:.86rem;margin:0 0 8px;font-weight:600}
   .result .perfect{color:var(--accent);font-size:.88rem;margin:0 0 6px}
   .result .streak{color:var(--ink-soft);font-size:.88rem;margin:0 0 16px}
   .result button{margin:0 4px}
@@ -312,7 +330,7 @@
       <div id="status">
         <div class="stat"><b id="time">0:00</b><span id="timeL">Time</span></div>
         <div class="stat"><b id="prog">0/16</b><span>Board</span></div>
-        <div class="stat"><b id="mist">0</b><span id="mistL">Mistakes</span></div>
+        <div class="stat"><b id="mist">0</b><span id="mistL">Mistakes</span><span id="mistCost" class="stat-note"></span></div>
         <div class="stat"><b id="hints">0</b><span id="hintsL">Hints</span></div>
         <div class="stat"><b id="diff">—</b><span>&nbsp;</span></div>
         <div class="stat"><b id="ranked">○ local</b><span>&nbsp;</span></div>

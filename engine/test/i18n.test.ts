@@ -3,7 +3,22 @@ import assert from 'node:assert/strict';
 import { generate } from '../src/core/generate.js';
 import { Clue, A, B } from '../src/core/clue.js';
 import { THEMES } from '../src/themes/all.js';
-import { renderContext, renderClue } from '../src/themes/index.js';
+import { renderContext, renderClue, resolveLabels } from '../src/themes/index.js';
+import { dealFor } from '../src/render/deal.js';
+import { existsSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/** The tests run from dist-test/, so walk up to whichever directory owns package.json
+ *  rather than hard-coding how deep the compiled output happens to sit. */
+const ROOT = (() => {
+  let d = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    if (existsSync(join(d, 'package.json'))) return d;
+    d = dirname(d);
+  }
+  throw new Error('package.json not found above the test file');
+})();
 import { tileArt } from '../src/render/art.js';
 import { getLocale } from '../src/i18n/index.js';
 import { ALL_LOCALES } from '../src/i18n/locales.js';
@@ -165,7 +180,12 @@ test('tile art is deterministic, well-formed, and state-aware', () => {
     const perTile = new Set<string>();
     for (let i = 0; i < puzzle.n; i++) {
       const base = tileArt({ theme, index: i, labelSeed: puzzle.labelSeed });
-      assert.ok(base.startsWith('<svg') && base.endsWith('</svg>'), `${theme.id}: not an svg`);
+      // A theme is either drawn (an SVG) or backed by real files (an <img> in a wrapper).
+      // Both are legitimate tiles; what matters is that neither comes out malformed.
+      const wellFormed = theme.images
+        ? base.startsWith('<span class="tile-photo">') && base.includes('<img src=') && base.endsWith('</span>')
+        : base.startsWith('<svg') && base.endsWith('</svg>');
+      assert.ok(wellFormed, `${theme.id}: malformed tile -> ${base.slice(0, 120)}`);
       assert.ok(!/undefined|NaN|null/.test(base), `${theme.id} tile ${i}: bad value in art -> ${base.slice(0, 160)}`);
       // deterministic: same inputs, same picture
       assert.equal(base, tileArt({ theme, index: i, labelSeed: puzzle.labelSeed }));
@@ -185,6 +205,30 @@ test('tile art is deterministic, well-formed, and state-aware', () => {
     tileArt({ theme: t, index: 0, labelSeed: a.labelSeed }),
     tileArt({ theme: t, index: 0, labelSeed: b.labelSeed }),
   );
+});
+
+test('an image-backed theme deals every tile a different work, and the files exist', () => {
+  for (const theme of THEMES.filter((t) => t.images)) {
+    const set = theme.images!;
+    for (const seed of ['gal-1', 'gal-2', 'gal-3']) {
+      const puzzle = generate({ seed, difficulty: 4, tagSchema: theme.tagSchema });
+      assert.ok(set.count >= puzzle.n, `${theme.id}: ${set.count} works cannot fill ${puzzle.n} tiles`);
+      const srcs = new Set<string>();
+      for (let i = 0; i < puzzle.n; i++) {
+        const n = dealFor(puzzle.labelSeed, set.count)[i % set.count];
+        // Two tiles showing the same picture would read as a hint that isn't there.
+        assert.ok(!srcs.has(set.src(n)), `${theme.id}: work ${n} appears twice on one board`);
+        srcs.add(set.src(n));
+        const file = join(ROOT, 'demo', set.src(n).replace(/^\//, ''));
+        assert.ok(existsSync(file), `${theme.id}: missing asset ${set.src(n)}`);
+        // the label under the tile has to be that picture's own title
+        if (set.title) {
+          const labels = resolveLabels(theme, 'en', puzzle);
+          assert.equal(labels[i].text, set.title(n), `${theme.id} tile ${i}: label does not match the work`);
+        }
+      }
+    }
+  }
 });
 
 test('the innocent/guilty theme reads correctly in all three languages', () => {
@@ -226,4 +270,44 @@ test('generated clues never say "at most zero" in any language', () => {
       }
     }
   }
+});
+
+test('a theme backed by real artwork deals pictures without repeating', () => {
+  const base = THEMES.find((t) => t.id === 'wall')!;
+  const withArt = {
+    ...base,
+    images: { count: 24, src: (n: number) => `/assets/wall/${String(n + 1).padStart(2, '0')}.webp`, mark: 'crack' as const },
+  };
+  const puzzle = generate({ seed: 'photos', difficulty: 5, tagSchema: base.tagSchema });
+
+  const srcOf = (i: number, state?: 0 | 1) => {
+    const html = tileArt({ theme: withArt, index: i, labelSeed: puzzle.labelSeed, state });
+    return /src="([^"]+)"/.exec(html)?.[1] ?? '';
+  };
+
+  const used = new Set<string>();
+  for (let i = 0; i < puzzle.n; i++) {
+    const src = srcOf(i);
+    assert.match(src, /^\/assets\/wall\/\d\d\.webp$/, 'uses the set, not the drawing');
+    assert.ok(!used.has(src), `tile ${i} repeated ${src} on the same board`);
+    used.add(src);
+  }
+  assert.equal(used.size, puzzle.n);
+
+  // same board, same pictures in the same places — everyone in a room must agree
+  assert.equal(srcOf(3), srcOf(3));
+  // a different board deals differently
+  const other = generate({ seed: 'photos-2', difficulty: 5, tagSchema: base.tagSchema });
+  const otherFirst = /src="([^"]+)"/.exec(
+    tileArt({ theme: withArt, index: 0, labelSeed: other.labelSeed }))?.[1];
+  assert.notEqual(otherFirst, srcOf(0));
+
+  // the marked state is shown over the photograph, and the photograph is unchanged
+  const marked = tileArt({ theme: withArt, index: 0, labelSeed: puzzle.labelSeed, state: 1 });
+  assert.ok(marked.includes('tile-overlay'), 'marked tiles get an overlay');
+  assert.ok(!tileArt({ theme: withArt, index: 0, labelSeed: puzzle.labelSeed, state: 0 }).includes('tile-overlay'));
+  assert.equal(/src="([^"]+)"/.exec(marked)?.[1], srcOf(0), 'and the same picture underneath');
+
+  // a theme with no set still draws
+  assert.ok(tileArt({ theme: base, index: 0, labelSeed: puzzle.labelSeed }).startsWith('<svg'));
 });

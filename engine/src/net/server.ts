@@ -196,7 +196,7 @@ export class GameServer {
       hintBudget: this.opts.hintBudget,
       shareSeed: ranked ? undefined : ref.seed,
       previousResult: prior ? {
-        editionId: prior.edition_id, timeMs: prior.time_ms, hintsUsed: prior.hints,
+        editionId: prior.edition_id, timeMs: prior.time_ms, timeAddedMs: prior.mistakes * 60_000, hintsUsed: prior.hints,
         mistakes: prior.mistakes, score: prior.score, perfect: !!prior.perfect,
         ranked: true, rank: await this.store.rankOf(ref.id, user.id), streak: 0,
       } : null,
@@ -257,7 +257,7 @@ export class GameServer {
       const dates: string[] = [];
       for (let i = 0; i < 40; i++) dates.push(isoDate(new Date(finished - i * 86400_000)));
       result = {
-        editionId: row.edition_id, timeMs: elapsed, hintsUsed: session.hintsUsed,
+        editionId: row.edition_id, timeMs: elapsed, timeAddedMs: s.timeAddedMs, hintsUsed: session.hintsUsed,
         mistakes: session.mistakes, score: s.score, perfect: s.perfect, ranked,
         rank: ranked ? await this.store.rankOf(row.edition_id, user.id) : null,
         streak: await this.store.streak(user.id, dates),

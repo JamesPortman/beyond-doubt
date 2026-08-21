@@ -1,4 +1,5 @@
 import { makeRng, Rng } from '../core/rng.js';
+import { dealFor } from './deal.js';
 import { Theme, ArtKind } from '../themes/index.js';
 import { State } from '../core/clue.js';
 
@@ -19,10 +20,15 @@ export interface ArtOptions {
 
 const SKIN = ['#f0d5b8', '#e0b892', '#d9a778', '#c08a5e', '#a06a45', '#7d4f33', '#5d3a26'];
 const HAIR = ['#22190f', '#3b2a18', '#5a3d21', '#7d5a2e', '#a8894f', '#c9b48c', '#4a4a52', '#6d2f22', '#8c8c94'];
-const IRIS = ['#4a6741', '#5a4632', '#3f5a6b', '#6b4a3a', '#2f4a3f', '#5c5347'];
+/** Eye colours chosen to be distinguishable at tile size: a true blue, a green, amber,
+ *  grey, and two browns that differ in value rather than hue. */
+const IRIS = ['#2f6fa8', '#3d8a63', '#a8762b', '#6f7d86', '#7a4a24', '#3a2a1c', '#4a8fa8', '#8a5a9c'];
 const CLOTH = ['#3d4f63', '#5c4a6b', '#6b4a3d', '#3f5f4a', '#7a3f47', '#4a4a55', '#6b6250'];
 
+const esc = (v: string) => v.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]!));
+
 export function tileArt(o: ArtOptions): string {
+  if (o.theme.images && o.theme.images.count > 0) return photoTile(o);
   const rng = makeRng(`${o.labelSeed}|art|${o.index}`);
   const kind = o.theme.artKind;
   const body = (() => {
@@ -36,6 +42,46 @@ export function tileArt(o: ArtOptions): string {
     }
   })();
   return `<svg class="tile-art" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">${body}</svg>`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Real artwork. A board deals from the set without repeating, so twenty tiles show
+ * twenty different pictures whenever the set is big enough. The deal is derived from
+ * the board's label seed, so everyone racing the same board sees the same pictures in
+ * the same places — the property the whole design depends on.
+ * ------------------------------------------------------------------ */
+
+function photoTile(o: ArtOptions): string {
+  const set = o.theme.images!;
+  const n = dealFor(o.labelSeed, set.count)[o.index % set.count];
+  const p = o.theme.palette;
+  const marked = o.state === 1;
+  const src = esc(set.src(n));
+
+  const overlay = !marked ? '' : {
+    cross: `<path d="M16 16L84 84M84 16L16 84" stroke="${p.stateB}" stroke-width="7" stroke-linecap="round" opacity=".9"/>`,
+    fade: `<rect width="100" height="100" fill="${p.tile}" opacity=".55"/>
+           <path d="M12 22L88 80" stroke="${p.accent}" stroke-width="3.4" stroke-linecap="round" opacity=".85"/>`,
+    crack: `<path d="M34 4 q7 26 -3 46 q-7 19 5 46" stroke="${p.stateB}" stroke-width="2" fill="none" opacity=".95"/>
+            <path d="M34 42 l-9 7M31 68 l10 6" stroke="${p.stateB}" stroke-width="1.4" fill="none" opacity=".8"/>`,
+    stamp: `<g transform="rotate(-13 50 52)" opacity=".92">
+              <rect x="14" y="40" width="72" height="22" rx="2" fill="none" stroke="${p.stateB}" stroke-width="3"/>
+              <rect x="20" y="49" width="60" height="5" rx="1" fill="${p.stateB}"/></g>`,
+    ring: `<circle cx="50" cy="50" r="26" fill="none" stroke="${p.accent}" stroke-width="3" opacity=".9"/>
+           <circle cx="50" cy="50" r="5" fill="${p.accent}"/>`,
+    // The one mark that does not damage the picture: a gallery puts a small red dot
+    // beside the label when a work sells, and everyone standing in the room knows
+    // what it means. It sits in the corner so the whole image stays readable.
+    dot: `<circle cx="82" cy="18" r="12" fill="${p.stateB}" opacity=".28"/>
+          <circle cx="82" cy="18" r="8.5" fill="${p.stateB}"/>
+          <circle cx="79" cy="15" r="2.6" fill="#ffffff" opacity=".35"/>`,
+  }[set.mark];
+
+  return `<span class="tile-photo"><img src="${src}" alt="" loading="lazy" decoding="async" draggable="false" onerror="this.style.display='none'">`
+    + (overlay
+      ? `<svg class="tile-art tile-overlay" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">${overlay}</svg>`
+      : '')
+    + `</span>`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -72,13 +118,6 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
   const eyeY = 44 + rng.int(3);
   const hw = 19.5 + rng.next() * 2.2;          // half-width of the head
   const guilty = o.state === 1;
-
-  // strands, so hair reads as hair rather than a painted cap
-  const strands = Array.from({ length: 7 }, (_, k) => {
-    const x = 50 - hw * 0.82 + (k * hw * 1.64) / 6;
-    return `<path d="M${x.toFixed(1)} ${(26 + rng.next() * 4).toFixed(1)}q${(rng.next() * 5 - 2.5).toFixed(1)} 9 ${(rng.next() * 4 - 2).toFixed(1)} 15"
-      stroke="${k % 2 ? hairLit : hairDark}" stroke-width="0.9" fill="none" opacity=".5" stroke-linecap="round"/>`;
-  }).join('');
 
   const hairBack = [
     '', '',
@@ -131,6 +170,7 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
     <ellipse cx="${cx}" cy="${eyeY}" rx="4.2" ry="3" fill="#fdfcfa"/>
     <ellipse cx="${cx}" cy="${eyeY}" rx="4.2" ry="3" fill="none" stroke="${shade2}" stroke-width="0.5" opacity=".5"/>
     <circle cx="${cx}" cy="${eyeY}" r="2.5" fill="${iris}"/>
+    <circle cx="${cx}" cy="${eyeY}" r="2.5" fill="none" stroke="${mix(iris, '#000000', 0.45)}" stroke-width="0.6"/>
     <circle cx="${cx}" cy="${eyeY}" r="1.15" fill="${ink}"/>
     <circle cx="${cx - 0.9}" cy="${eyeY - 1}" r="0.7" fill="#fff"/>
     <path d="M${cx - 4.2} ${eyeY - 0.6}q4.2-4 8.4 0" stroke="${ink}" stroke-width="1.1" fill="none" stroke-linecap="round"/>`;
@@ -166,7 +206,7 @@ function portrait(rng: Rng, o: ArtOptions, mono: boolean): string {
     <ellipse cx="${50 - hw * 0.6}" cy="${eyeY + 8}" rx="4.4" ry="2.8" fill="${blush}" opacity="${mono ? 0 : 0.45}"/>
     <ellipse cx="${50 + hw * 0.6}" cy="${eyeY + 8}" rx="4.4" ry="2.8" fill="${blush}" opacity="${mono ? 0 : 0.45}"/>
     ${freckleDots}
-    ${hairFront}${strands}
+    ${hairFront}
     <path d="M${43 - rng.next()} ${eyeY - 5.4}q4-2.8 8 -0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
     <path d="M${53 + rng.next()} ${eyeY - 5.7}q4-2.5 8 0.3" stroke="${hairDark}" stroke-width="2.1" fill="none" stroke-linecap="round"/>
     ${eye(50 - hw * 0.42)}

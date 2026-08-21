@@ -191,6 +191,8 @@ export const pt: Locale = {
     splitClues: 'Pistas divididas', yourClues: 'Suas pistas', playerN: 'Jogador',
     perfect: 'Perfeito — sem dicas, sem erros', solvedIn: 'Resolvido em', weeklyTotal: 'Total da semana',
     complete: 'Completo',
+    timePenalty: 'somado por erros', adjustedTime: 'Tempo ajustado',
+    mistakeCost: '+1:00 cada',
     actions: {
       clearTags: 'Limpar marcas', inspect: 'Inspecionar', showHint: 'Ver dica', settings: 'Ajustes',
       playTutorial: 'Ver tutorial', shareScenario: 'Compartilhar cenário',
@@ -202,7 +204,7 @@ export const pt: Locale = {
       steps: [
         'Cada peça esconde um de dois estados. Sua tarefa é descobrir qual — nunca chutar.',
         'Comece pelas pistas à direita. Toda pista é verdadeira, inclusive as que vêm de uma peça no estado marcado. Aqui ninguém mente.',
-        'Uma peça com um ponto no canto já está decidida pelas pistas que você tem. Escolha o rótulo certo acima do tabuleiro e clique nela.',
+        'Uma peça com um ponto no canto já está decidida pelas pistas que você tem. Escolha o rótulo certo acima do tabuleiro e clique nela. Escolher o rótulo errado é o único erro possível aqui, e soma um minuto ao seu tempo.',
         'Resolver uma peça libera o que ela sabia, então a lista de pistas cresce conforme você avança. É esse o ciclo inteiro.',
         'Tente clicar numa peça sem ponto. O tabuleiro recusa, porque nada ainda obriga aquilo. Essa recusa é a promessa: você nunca precisa chutar.',
         'Clique com o botão direito para deixar uma anotação, e use Inspecionar quando a palavra exata de uma pista importar. É só isso — agora vá terminar.',
