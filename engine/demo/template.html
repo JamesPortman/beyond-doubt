@@ -315,6 +315,38 @@
   .result button{margin:0 4px}
   .result .primary{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
 
+  /* ---------- "How it was built", below the board ---------- */
+  .how{max-width:42rem;margin:72px auto 0;padding-top:44px;border-top:1px solid var(--line)}
+  .how .eyebrow{font-family:var(--font-display);font-size:.7rem;letter-spacing:.2em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 12px;font-weight:700}
+  .how h2{font-family:var(--font-display);font-size:clamp(1.7rem,5vw,2.4rem);line-height:1.1;
+    margin:0 0 14px;letter-spacing:-.015em}
+  .how .standfirst{font-size:1.1rem;line-height:1.55;color:var(--ink-soft);margin:0 0 34px}
+  .how h3{font-family:var(--font-display);font-size:clamp(1.1rem,3vw,1.34rem);line-height:1.2;
+    margin:44px 0 3px}
+  .how h3 + .sub{font-family:var(--font-display);font-size:.7rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 16px;font-weight:700}
+  .how p{margin:0 0 17px;line-height:1.62;color:var(--ink)}
+  .how em{font-style:italic}
+  .how .pull{background:var(--surface-alt);border:1px solid var(--line);
+    border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:17px 21px;margin:25px 0}
+  .how .pull p:last-child{margin-bottom:0}
+  .how .pull .lab{font-family:var(--font-display);font-size:.68rem;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--accent);font-weight:700;display:block;margin-bottom:7px}
+  .how .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;
+    background:var(--line);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:28px 0}
+  .how .fig{background:var(--surface-alt);padding:17px 14px;text-align:center}
+  .how .fig b{display:block;font-family:var(--font-display);font-size:1.55rem;line-height:1;
+    margin-bottom:5px;font-variant-numeric:tabular-nums}
+  .how .fig span{font-size:.76rem;color:var(--ink-soft);line-height:1.3;display:block}
+  .how .minigrid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;max-width:14rem;margin:26px 0}
+  .how .minigrid i{aspect-ratio:1;border-radius:3px;background:var(--surface-alt);
+    border:1px solid var(--line)}
+  .how .minigrid i.a{background:var(--state-a);border-color:var(--state-a)}
+  .how .minigrid i.b{background:var(--state-b);border-color:var(--state-b)}
+  .how .colophon{margin-top:40px;padding-top:22px;border-top:1px solid var(--line);
+    font-size:.9rem;color:var(--ink-soft)}
+
   .site-foot{max-width:1180px;margin:28px auto 40px;padding:0 18px;text-align:center;
     font-size:.86rem}
   .site-foot a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--line);
@@ -462,8 +494,130 @@
       <div class="panel" id="wkpanel"><h2 class="panel-head" id="wkhead">This week</h2><div id="wkrows"></div></div>
     </aside>
   </div>
+
+  <section class="how" id="how">
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>How it was built</h2>
+    <p class="standfirst">A daily deduction puzzle with one rule: you are never asked to guess.
+    That sentence is easy to write on a box and expensive to keep.</p>
+
+    <p>Most puzzles that call themselves logic puzzles will, sooner or later, hand you a
+    fifty-fifty and hope you don't notice. This one can't. Every square you are allowed to
+    turn over has already been decided by the clues in front of you, and if it hasn't, the
+    board refuses the move and tells you why. Everything below is what that promise costs.</p>
+
+    <h3>A board is a number</h3>
+    <p class="sub">Twenty squares, one integer</p>
+    <p>A board is at most twenty squares, and each square is one of two states. That whole
+    picture fits in a single 32-bit integer — one bit per square. Every clue compiles down to
+    two or three bit operations against that number, which means the engine can ask "is this
+    still true?" millions of times without anyone noticing.</p>
+    <p>That matters because of how the promise is kept. When you tap a square, the engine
+    walks <em>every arrangement of the board consistent with the clues you currently hold</em>.
+    If all of them agree that this square is sold, it's sold. If even one disagrees, nothing
+    forces it yet, and the move is refused. There is no table of answers being consulted —
+    the refusal is a proof, computed while your finger is still on the glass.</p>
+
+    <div class="minigrid" aria-hidden="true">
+      <i class="a"></i><i class="b"></i><i></i><i class="a"></i>
+      <i></i><i class="a"></i><i class="b"></i><i></i>
+      <i class="b"></i><i></i><i class="a"></i><i class="a"></i>
+    </div>
+
+    <h3>Nothing on the board is ever a lie</h3>
+    <p class="sub">Generation</p>
+    <p>Boards are generated backwards. The solution is drawn first, and then the generator
+    only ever considers clues that are <b>true of that solution</b> — so a clue can never be
+    added that quietly eliminates the answer. From that pool it builds a chain: an opening
+    fact, then a clue that unlocks a square, then the clue that square was holding, and
+    onward until the whole board is forced.</p>
+    <p>If the chain can't be completed, the board is thrown away and another is drawn.
+    Nothing ships that hasn't been solved by the machine first, which is why "there is always
+    a next move" is a guarantee rather than a hope.</p>
+    <p>Every board is also a pure function of its seed. Two people opening the same day's
+    puzzle on opposite sides of the world are handed the identical board, generated
+    independently on each device, with nothing passed between them.</p>
+
+    <h3>Your browser is never sent the answer</h3>
+    <p class="sub">Server-verified play</p>
+    <p>Ranked play has an awkward requirement: the server has to verify every move, but the
+    game has to feel instant. Sending the solution to the browser would solve the second
+    problem and destroy the first.</p>
+    <div class="pull">
+      <span class="lab">The trick</span>
+      <p>The forced set <em>is</em> the answer. If every arrangement consistent with your clues
+      agrees on a square, that agreement is the truth about it — so a browser holding only the
+      clues can play a full board correctly while never being told a single answer.</p>
+    </div>
+    <p>So the client deduces locally and responds immediately, and the server independently
+    re-derives the same thing and records it. The clock belongs to the server. So does the
+    decision about which day it is, which is why a fast time can't be claimed by a slow player
+    with the developer tools open.</p>
+
+    <h3>One engine, seven settings</h3>
+    <p class="sub">Themes</p>
+    <p>Nothing in the engine knows about paintings, or guests, or orchards. A theme is a data
+    file — two state names, a handful of nouns, a palette, one drawing function — and
+    registering it gets the generator, the solver, hints, scoring, the archive, the weekly
+    edition, the leaderboard, accessibility and all three languages for free.</p>
+    <p>That constraint is what made it cheap to be strange. An auction, a supper party where
+    someone is guilty, a diseased orchard, a film cut in the edit, a stage-door callboard, a
+    service record, a plate of nineteenth-century sky — same puzzle underneath, every time.</p>
+
+    <h3>Three languages, and not a translated sentence among them</h3>
+    <p class="sub">English · Português · Español</p>
+    <p>Clues are never stored as text. They are structures — <em>count, this column, this
+    state, exactly two</em> — and the sentence is composed at the moment you read it, in your
+    language, agreeing with the noun the theme happens to use.</p>
+    <p>This is the part that can't be faked with string replacement. A tree is feminine in
+    Portuguese and masculine in Spanish; a guest can be either, depending who they are. So the
+    game carries the grammar rather than the sentences, and agreement is computed:
+    <em>Nadia é culpada</em>, <em>Owen é culpado</em>. Getting this wrong is invisible to a
+    monolingual reader and grating to everyone else.</p>
+
+    <h3>The pictures are real</h3>
+    <p class="sub">Auction Night</p>
+    <p>Twenty-one of the works in Auction Night are paintings and photographs of Georgian Bay
+    and the Blue Mountains by James Portman. They aren't decoration bolted on at the end — the
+    theme was reframed around them. A gallery marks a sold work with a small red dot beside the
+    label, so that is what a decided square gets: a mark that leaves the picture alone, rather
+    than a cross drawn through it.</p>
+
+    <h3>What accessibility actually meant here</h3>
+    <p class="sub">Derived, not declared</p>
+    <p>Dark mode, light mode, high contrast and a colour-blind-safe palette are all
+    <em>derived</em> from each theme's own colours rather than hand-drawn per theme — so a new
+    theme cannot ship with a broken variant. Contrast ratios are asserted in the test suite
+    across every theme and mode combination.</p>
+    <p>Two genuine failures were caught that way and fixed at the source: one theme put its
+    secondary text at 2.84:1 on a cork background, and high contrast wasn't helping because it
+    only darkened the ink and left the background alone.</p>
+
+    <h3>How it's checked</h3>
+    <p class="sub">Testing</p>
+    <div class="figures">
+      <div class="fig"><b>69</b><span>tests, on SQLite</span></div>
+      <div class="fig"><b>32</b><span>re-run on real Postgres</span></div>
+      <div class="fig"><b>294</b><span>boards fuzzed per run</span></div>
+      <div class="fig"><b>99ms</b><span>worst generate-and-solve</span></div>
+    </div>
+    <p>The fuzz run generates hundreds of boards across every difficulty and theme, solves each
+    one without guessing, and renders every clue in all three languages, looking for anything
+    that reads badly or can't be finished. The whole suite runs twice — once against SQLite and
+    once against a real Postgres — because the two disagree in small, expensive ways. One query
+    passed happily on SQLite and failed on Postgres because a column that is a boolean in one is
+    an integer in the other; nine tests went red the moment they met the real database.</p>
+    <p>Some of the better bugs were found by the tests rather than by players: a hint ladder
+    that never escalated, so two presses returned the same clue and the whole hint budget could
+    be spent on one fact; and a clue panel that rebuilt the board on hover, which was harmless
+    until the clues moved onto the cards and started destroying the very element under the
+    pointer.</p>
+
+    <p class="colophon">Built in TypeScript with no runtime dependencies in the engine.
+    Deployed on Vercel with Postgres. Artwork by James Portman.</p>
+  </section>
 </div>
-<footer class="site-foot"><a href="/how.html">How it was built</a></footer>
+<footer class="site-foot"><a href="#how">How it was built</a></footer>
 <div class="toast" id="toast"></div>
 <div id="overlay"></div>
 <script type="module">

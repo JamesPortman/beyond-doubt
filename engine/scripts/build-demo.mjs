@@ -16,11 +16,6 @@ writeFileSync('demo/dist/clues-demo.html', html);
 // Themes backed by real artwork load their files at runtime, so the pictures have to be
 // in the published tree next to the page. The single-file build has no assets alongside
 // it and falls back to the drawn tile.
-// Static companion pages ride along with the build rather than being a second deploy.
-if (existsSync('demo/how.html')) {
-  cpSync('demo/how.html', 'demo/dist/how.html');
-  console.log('demo/dist/how.html    copied');
-}
 if (existsSync('demo/assets')) {
   cpSync('demo/assets', 'demo/dist/assets', { recursive: true });
   console.log('demo/dist/assets    copied');
