@@ -41,6 +41,17 @@ export class Session {
   knownA = 0;
   mistakes = 0;
   hintsUsed = 0;
+  /** Per square, for the result grid: how many wrong answers this one took. */
+  missesByCell: number[] = [];
+  /** Per square: 0 none, 1 a hint named it, 2 a hint named it after a clue hint. */
+  hintedByCell: number[] = [];
+  /** Whether the last hint spent was the clue-level one, so the next cell hint counts
+   *  as the double it actually was. */
+  private clueHintPending = false;
+  /** The board position the clue hint was given for. A second press at the same
+   *  position must escalate to naming a square; without this the scan simply finds the
+   *  same load-bearing clue again and the player pays twice for one fact. */
+  private hintAnchor = -1;
   startedAt: number;
   finishedAt: number | null = null;
   /** cells the player marked, in order — the replay */
@@ -112,6 +123,7 @@ export class Session {
     const truth: State = ((d.forcedB >> cell) & 1) ? B : A;
     if (state !== truth) {
       this.mistakes++;
+      this.missesByCell[cell] = (this.missesByCell[cell] ?? 0) + 1;
       return { outcome: 'wrong', unlocked: [], solved: false };
     }
     if (truth === B) this.knownB |= 1 << cell; else this.knownA |= 1 << cell;
@@ -129,15 +141,24 @@ export class Session {
     const baseForced = base.forcedA | base.forcedB;
     if (!baseForced) return { kind: 'none' };
 
-    for (const c of this.activeClues()) {
-      const without = deduce(this.grid, this.activeCompiled(c.id), this.knownB, this.knownA);
-      if ((without.forcedA | without.forcedB) !== baseForced) {
-        this.hintsUsed++;
-        return { kind: 'clue', clueId: c.id };
+    // Two presses, two different answers. Only scan for a clue if we have not already
+    // handed one over for this exact position.
+    const escalate = this.clueHintPending && this.hintAnchor === this.known;
+    if (!escalate) {
+      for (const c of this.activeClues()) {
+        const without = deduce(this.grid, this.activeCompiled(c.id), this.knownB, this.knownA);
+        if ((without.forcedA | without.forcedB) !== baseForced) {
+          this.hintsUsed++;
+          this.clueHintPending = true;
+          this.hintAnchor = this.known;
+          return { kind: 'clue', clueId: c.id };
+        }
       }
     }
     const cell = bits(baseForced)[0];
     this.hintsUsed++;
+    this.hintedByCell[cell] = Math.max(this.hintedByCell[cell] ?? 0, this.clueHintPending ? 2 : 1);
+    this.clueHintPending = false;
     return { kind: 'cell', cell, state: ((base.forcedB >> cell) & 1) ? B : A };
   }
 
@@ -157,6 +178,7 @@ export class Session {
     return {
       knownB: this.knownB, knownA: this.knownA, mistakes: this.mistakes,
       hintsUsed: this.hintsUsed, elapsedMs: this.elapsedMs, solved: this.solved,
+      missesByCell: this.missesByCell.slice(), hintedByCell: this.hintedByCell.slice(),
       revealed: popcount(this.known), total: this.grid.n,
     };
   }

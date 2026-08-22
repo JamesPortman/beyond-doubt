@@ -5,6 +5,7 @@ export * from './core/solver.js';
 export * from './core/generate.js';
 export * from './core/session.js';
 export * from './core/scoring.js';
+export * from './core/share.js';
 export * from './core/edition.js';
 export * from './core/leaderboard.js';
 export * from './i18n/index.js';

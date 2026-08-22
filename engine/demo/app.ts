@@ -1,22 +1,25 @@
 import {
   allThemes, getTheme, renderContext, renderClue, tagLabel,
-  getLocale, ALL_LOCALES, LocaleCode, Theme,
+  getLocale, ALL_LOCALES, LocaleCode, Theme, agree,
   Session, State, bits, PuzzleView, PlacedClue,
   scoreRun, formatDuration,
   dailyEdition, weeklyEdition, freeEdition, buildPuzzle, EditionRef, isoDate,
-  LocalLeaderboard, entryFrom,
+  LocalLeaderboard, entryFrom, makeRng,
   Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay, PublicFlags,
   tileArt, ART_DEFS,
   Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
-  termsForClue, TermId, dealFor,
+  termsForClue, TermId, dealFor, resultGrid, shareText,
 } from '../src/index.js';
 
 type Mode = 'daily' | 'weekly' | 'free' | 'split' | 'room' | 'archive';
 /** 0 = no tag, 1..5 = a colour. The original uses coloured corner tags as working
  *  notes rather than a two-state pencil, and once you are tracking three hypotheses at
  *  once two states is not enough. */
-type Pencil = 0 | 1 | 2 | 3 | 4 | 5;
-const TAG_COLOURS = ['transparent', '#e63946', '#f4a300', '#2a9d8f', '#4361ee', '#9d4edd'];
+/** A working mark, in the two colours the board itself uses: none, leaning-A, leaning-B.
+ *  Five arbitrary colours asked the player to invent a key and then remember it; two that
+ *  match the states you are already deciding between need no key at all. */
+type Pencil = 0 | 1 | 2;
+const PENCIL_STATES = 3;
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
 const el = (tag: string, cls = '', text = '') => {
@@ -60,6 +63,10 @@ class App {
   /** What the operator has left switched on. Absent until the server answers; everything
    *  is open until then, because a local board needs no permission from anyone. */
   flags: PublicFlags | null = null;
+  /** Cells a hint has pointed at. Only these light up under the default setting. */
+  hintedCells = new Set<number>();
+  private flavourDeal = new Map<number, string>();
+  private flavourKey = '';
   hintArmed = false;
   shareSeed: string | null = null;
   tutorialStep = -1;
@@ -177,6 +184,7 @@ class App {
     this.hintsUsed = 0; this.mistakes = 0; this.serverElapsed = 0;
     this.playId = null; this.previousResult = null;
     this.activePlayer = 0; this.highlight = 0;
+    this.hintedCells.clear();
 
     if (this.beat) { clearInterval(this.beat); this.beat = null; }
     if (this.prefs.mode !== 'room') { this.roomId = null; this.roomCode = null; this.players = []; }
@@ -284,6 +292,8 @@ class App {
     // Cold Open's labels are sentences ("She burns the letter"), so they stay in sentence
     // case; every other theme labels a person, a lot or a coordinate, which reads better shouted.
     document.body.dataset.labelMode = this.theme.labelMode;
+    document.body.dataset.flavour = this.settings.showFlavour;
+    document.body.dataset.tagSide = this.settings.tagSide;
     document.body.dataset.motion = this.settings.reduceMotion ? 'reduced' : 'normal';
     document.documentElement.lang = this.loc.bcp47;
   }
@@ -423,6 +433,18 @@ class App {
     void this.paintLeaderboard();
   }
 
+  /** Repaint only what the highlight touches. Rebuilding the grid to move a highlight
+   *  was survivable while clues lived in a side panel; now that a clue sits inside a
+   *  tile, a rebuild detaches the very element the pointer is over — mouseenter and
+   *  mouseleave then take turns tearing the board down. */
+  paintHighlight() {
+    const cells = document.querySelectorAll<HTMLElement>('#board .cell');
+    cells.forEach((cell, i) => {
+      cell.classList.toggle('lit', !!((this.highlight >> i) & 1));
+      cell.classList.toggle('dimmed', this.inspecting && this.highlight !== 0 && !((this.highlight >> i) & 1));
+    });
+  }
+
   paintBoard() {
     const p = this.session.puzzle;
     const ctx = renderContext(this.theme, this.prefs.locale, p);
@@ -432,6 +454,9 @@ class App {
     const d = this.session.deduction();
     const forced = d.forcedA | d.forcedB;
     const tagKey = Object.keys(this.theme.tagSchema)[0];
+    const visible = this.prefs.mode === 'split' && !this.online
+      ? this.session.cluesFor(this.activePlayer)
+      : this.session.activeClues();
 
     for (let i = 0; i < p.n; i++) {
       const knownB = (this.session.knownB >> i) & 1;
@@ -441,12 +466,19 @@ class App {
       cell.classList.toggle('known', !!known);
       cell.classList.toggle('is-a', !!knownA);
       cell.classList.toggle('is-b', !!knownB);
-      cell.classList.toggle('forced', !known && !!((forced >> i) & 1));
+      // Telling everyone which square is decidable removes the "where do I look next"
+      // half of the puzzle. By default you only get it on a square you spent a hint on.
+      const advertise = this.settings.showSolvable === 'always'
+        || (this.settings.showSolvable === 'onHint' && this.hintedCells.has(i));
+      cell.classList.toggle('forced', advertise && !known && !!((forced >> i) & 1));
       cell.classList.toggle('lit', !!((this.highlight >> i) & 1));
       cell.classList.toggle('dimmed', this.inspecting && this.highlight !== 0 && !((this.highlight >> i) & 1));
-      if (this.pencils[i] && !known) {
-        const tag = el('span', 'tile-tag');
-        tag.style.background = TAG_COLOURS[this.pencils[i]];
+      if (!known) {
+        // Always present, faint when unset: a corner you cannot see is a corner nobody
+        // taps. It swallows its own click so tagging never opens the sheet.
+        const tag = el('span', `tile-tag t${this.pencils[i]}`);
+        tag.title = this.ui.actions.clearTags;
+        tag.onclick = (e) => { e.stopPropagation(); this.cyclePencil(i); };
         cell.appendChild(tag);
       }
       if (this.settings.tileArt) {
@@ -465,6 +497,35 @@ class App {
       cap.appendChild(el('span', 'cell-name', ctx.labels[i].text));
       if (tagKey) cap.appendChild(el('span', 'cell-tag', tagLabel(this.theme, this.prefs.locale, tagKey, p.tags[i][tagKey])));
       cell.appendChild(cap);
+
+      // The clue this person was holding, now that they are resolved.
+      const heldClue = known ? visible.find((c) => c.gate === i) : undefined;
+      const flavour = known && !heldClue ? this.flavourFor(i) : '';
+      if (heldClue) {
+        const isDone = this.doneClues.has(heldClue.id);
+        const box = el('span', 'cell-clue'
+          + (isDone && this.settings.usedClues === 'dim' ? ' done' : '')
+          + (this.inspectClue === heldClue.id ? ' picked' : ''),
+          renderClue(this.loc, this.theme, ctx, heldClue.clue, heldClue.order));
+        box.onclick = (e) => {
+          e.stopPropagation();          // the tile underneath opens the sheet; this does not
+          if (this.inspecting) {
+            this.inspectClue = heldClue.id; this.inspectCell = null;
+            this.highlight = maskOf(this.session.touches(heldClue.clue));
+            this.render();
+            return;
+          }
+          if (isDone) this.doneClues.delete(heldClue.id); else this.doneClues.add(heldClue.id);
+          this.paintBoard();
+        };
+        box.onmouseenter = () => { if (!this.inspecting) { this.highlight = maskOf(this.session.touches(heldClue.clue)); this.paintHighlight(); } };
+        box.onmouseleave = () => { if (!this.inspecting) { this.highlight = 0; this.paintHighlight(); } };
+        cell.appendChild(box);
+        cell.classList.add('has-clue');
+      } else if (flavour) {
+        cell.appendChild(el('span', 'cell-clue flavour', flavour));
+        cell.classList.add('has-clue', 'has-flavour');
+      }
       if (known) {
         const st = knownB ? this.strings.states.b : this.strings.states.a;
         cell.appendChild(el('span', 'cell-state', st.name));
@@ -479,7 +540,7 @@ class App {
       cell.addEventListener('touchstart', () => {
         held = setTimeout(() => {
           held = null;
-          if (!known) { this.pencils[i] = ((this.pencils[i] + 1) % TAG_COLOURS.length) as Pencil; this.render(); }
+          if (!known) this.cyclePencil(i);
         }, 450) as unknown as number;
       }, { passive: true });
       const cancelHold = () => { if (held !== null) { clearTimeout(held); held = null; } };
@@ -487,7 +548,7 @@ class App {
       cell.addEventListener('touchmove', cancelHold);
       cell.oncontextmenu = (e) => {
         e.preventDefault();
-        if (!known) { this.pencils[i] = ((this.pencils[i] + 1) % TAG_COLOURS.length) as Pencil; this.render(); }
+        if (!known) this.cyclePencil(i);
       };
       // where everyone else is looking, right now
       const here = this.players.filter((pl) => !pl.you && pl.focusCell === i && pl.idleSeconds <= 30);
@@ -514,34 +575,44 @@ class App {
     const visible = this.prefs.mode === 'split' && !this.online
       ? this.session.cluesFor(this.activePlayer)
       : this.session.activeClues();
-    const section = (heading: string, items: PlacedClue[]) => {
-      if (!items.length) return;
-      list.appendChild(el('h3', 'clue-head', heading));
-      for (const pc of items) {
-        const isDone = this.doneClues.has(pc.id);
-        if (isDone && this.settings.usedClues === 'hide' && !this.session.solved) continue;
-        const row = el('div', 'clue' + (isDone && this.settings.usedClues === 'dim' ? ' done' : '')
-          + (this.inspectClue === pc.id ? ' picked' : ''));
-        row.appendChild(el('p', 'clue-text', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
-        if (pc.gate !== null) row.appendChild(el('span', 'clue-src', `${this.ui.unlockedBy} ${ctx.labels[pc.gate].text}`));
-        row.onmouseenter = () => { if (!this.inspecting) { this.highlight = maskOf(this.session.touches(pc.clue)); this.paintBoard(); } };
-        row.onmouseleave = () => { if (!this.inspecting) { this.highlight = 0; this.paintBoard(); } };
-        row.onclick = () => {
-          if (this.inspecting) {
-            this.inspectClue = pc.id; this.inspectCell = null;
-            this.highlight = maskOf(this.session.touches(pc.clue));
-            this.render();
-            return;
-          }
-          if (isDone) this.doneClues.delete(pc.id); else this.doneClues.add(pc.id);
-          this.paintClues();
-        };
-        list.appendChild(row);
-      }
-    };
-    section(this.ui.openingClues, visible.filter((c) => c.gate === null));
-    section(this.ui.clues, visible.filter((c) => c.gate !== null));
+
+    // Reveal order, newest first. A gated clue was revealed by the move that solved its
+    // gate, so the move log gives the ordering for free; the openers were there before
+    // any move and settle at the bottom.
+    const revealedAt = new Map<number, number>();
+    this.session.moves.forEach((m, k) => revealedAt.set(m.cell, k));
+    const rank = (c: PlacedClue) => (c.gate === null ? -1 : revealedAt.get(c.gate) ?? -1);
+    const feed = [...visible].sort((a, b) => rank(b) - rank(a));
+    const newest = feed.length && rank(feed[0]) >= 0 ? feed[0].id : null;
+
+    list.appendChild(el('h3', 'clue-head', this.ui.clues));
+    for (const pc of feed) {
+      const isDone = this.doneClues.has(pc.id);
+      if (isDone && this.settings.usedClues === 'hide' && !this.session.solved) continue;
+      const row = el('div', 'clue' + (isDone && this.settings.usedClues === 'dim' ? ' done' : '')
+        + (this.inspectClue === pc.id ? ' picked' : '')
+        + (pc.id === newest && !this.session.solved ? ' fresh' : ''));
+      row.appendChild(el('p', 'clue-text', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
+      row.appendChild(el('span', 'clue-src', pc.gate === null
+        ? this.ui.openingClues
+        : `${this.ui.unlockedBy} ${ctx.labels[pc.gate].text}`));
+      row.onmouseenter = () => { if (!this.inspecting) { this.highlight = maskOf(this.session.touches(pc.clue)); this.paintHighlight(); } };
+      row.onmouseleave = () => { if (!this.inspecting) { this.highlight = 0; this.paintHighlight(); } };
+      row.onclick = () => {
+        if (this.inspecting) {
+          this.inspectClue = pc.id; this.inspectCell = null;
+          this.highlight = maskOf(this.session.touches(pc.clue));
+          this.render();
+          return;
+        }
+        if (isDone) this.doneClues.delete(pc.id); else this.doneClues.add(pc.id);
+        this.paintClues();
+      };
+      list.appendChild(row);
+    }
   }
+
+
 
   paintPlayers() {
     const wrap = $('#players');
@@ -587,12 +658,12 @@ class App {
     $('#time').textContent = showTime ? formatDuration(ms) : '—';
     $('#timeL').textContent = this.ui.timeLabel;
     const mistakes = this.online ? this.mistakes : s.mistakes;
-    $('#mist').textContent = mistakes > 0 ? `${mistakes} (+${mistakes}:00)` : '0';
-    // The counter only tells you the cost after you have paid it, so the rule is
-    // spelled out under the label from the start.
+    $('#mist').textContent = String(mistakes);
+    // The cost of a mistake is real but it is settled at the end, not shouted at you
+    // mid-board. The tooltip keeps the rule reachable without putting a running
+    // penalty on screen while someone is thinking.
     $('#mistL').textContent = this.ui.mistakes;
     $('#mistL').title = this.ui.mistakeCost;
-    $('#mistCost').textContent = this.ui.mistakeCost;
     $('#hints').textContent = String(this.online ? this.hintsUsed : s.hintsUsed);
     $('#hintsL').textContent = this.ui.hintsUsed;
     $('#prog').textContent = `${s.revealed}/${s.total}`;
@@ -647,7 +718,7 @@ class App {
     // Deduce locally for instant feedback — the client can prove which cells are legal
     // from the clues it holds. The server still re-checks every move.
     const r = this.session.mark(i, state);
-    if (r.outcome === 'not-deducible') { this.toast(this.ui.notDeducible, 'warn'); this.shake(i); return; }
+    if (r.outcome === 'not-deducible') { this.shake(i); this.showRefusal(i, state); return; }
 
     if (this.online && this.playId) {
       this.busy = true;
@@ -666,7 +737,11 @@ class App {
       } finally { this.busy = false; }
     }
 
-    if (r.outcome === 'wrong') { this.toast(this.ui.illegalMove, 'bad'); this.shake(i); this.render(); return; }
+    // 'wrong' means the board IS decided, the other way. The player gets the same
+    // sentence as 'not-deducible' on purpose: saying "every arrangement has this one
+    // available" would hand over the answer for free, which is worse than any penalty.
+    // "You cannot show X is sold from what you know" is true in both cases.
+    if (r.outcome === 'wrong') { this.shake(i); this.render(); this.showRefusal(i, state); return; }
     if (this.settings.autoClearPencil) this.pencils[i] = 0;
     if (this.session.solved && this.settings.undimAtEnd) this.doneClues.clear();
     this.render();
@@ -701,6 +776,7 @@ class App {
       this.toast(this.ui.hintClue, 'good');
     } else if (h.kind === 'cell' && h.cell !== undefined) {
       this.highlight = 1 << h.cell;
+      this.hintedCells.add(h.cell);
       this.toast(this.ui.hintCell, 'good');
     }
     this.render();
@@ -724,6 +800,11 @@ class App {
   }
 
   showResult(r: RunResult) {
+    const s = this.session.snapshot();
+    const p = this.session.puzzle;
+    const marks = { w: p.w, h: p.h, missesByCell: s.missesByCell, hintedByCell: s.hintedByCell };
+    const edition = this.edition.date ?? this.edition.id;
+
     const ov = $('#overlay');
     ov.innerHTML = '';
     const card = el('div', 'result');
@@ -734,27 +815,98 @@ class App {
         `+${formatDuration(r.timeAddedMs)} ${this.ui.timePenalty} → ${this.ui.adjustedTime} ${formatDuration(r.timeMs + r.timeAddedMs)}`));
     }
     card.appendChild(el('p', 'score', `${this.ui.scoreLabel} ${r.score}`));
+
+    // The grid IS the share. It goes on the card so what you post is what you saw.
+    card.appendChild(el('pre', 'result-grid', resultGrid(marks)));
+
+    if (typeof r.percentile === 'number') {
+      card.appendChild(el('p', 'perfect', this.ui.percentileTop.replace('{n}', String(r.percentile))));
+    }
+    if (typeof r.perfectRate === 'number') {
+      card.appendChild(el('p', 'streak', this.ui.perfectShare.replace('{n}', String(r.perfectRate))));
+    }
     if (r.rank) card.appendChild(el('p', 'perfect', `${this.ui.rank} ${r.rank}`));
     if (r.perfect) card.appendChild(el('p', 'perfect', this.ui.perfect));
     if (!r.ranked) card.appendChild(el('p', 'streak', this.online ? 'Practice run — not ranked' : 'Local run — sign in for ranked play'));
     card.appendChild(el('p', 'streak', `${this.ui.streak} ${r.streak}`));
-    const share = el('button', 'primary', this.ui.share);
-    share.onclick = () => {
-      const txt = `${this.strings.title} ${this.edition.date ?? ''} — ${formatDuration(r.timeMs)} · ${r.score}${r.perfect ? ' ★' : ''}`;
-      void navigator.clipboard?.writeText(txt);
-      share.textContent = this.ui.copied;
+
+    const text = shareText({
+      ...marks, title: this.strings.title, edition,
+      elapsedMs: r.timeMs, addedMs: r.timeAddedMs,
+      url: globalThis.location?.origin || undefined,
+    });
+
+    const row = el('div', 'result-share');
+    const copy = el('button', '', this.ui.shareCopy);
+    copy.onclick = () => {
+      void navigator.clipboard?.writeText(text);
+      copy.textContent = this.ui.copied;
     };
-    const again = el('button', '', this.ui.newGame);
+    row.appendChild(copy);
+    // Native share is the one that works on a phone, where most of this gets posted.
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      const send = el('button', '', this.ui.shareSend);
+      send.onclick = () => { void navigator.share!({ text }).catch(() => { /* dismissed */ }); };
+      row.appendChild(send);
+    }
+    const img = el('button', '', this.ui.shareImage);
+    img.onclick = () => void this.shareImage(text);
+    row.appendChild(img);
+    card.appendChild(row);
+
+    const again = el('button', 'primary', this.ui.newGame);
     again.onclick = () => { ov.classList.remove('on'); void this.newBoard(); };
-    card.appendChild(share); card.appendChild(again);
+    card.appendChild(again);
     ov.appendChild(card);
     ov.classList.add('on');
     void this.paintLeaderboard();
   }
 
+  /** The image share. Instagram and the rest will not take text, and a screenshot of the
+   *  card would carry the board with it — so the picture is drawn from the same string
+   *  the text share uses, and carries no more information than that. */
+  private async shareImage(text: string): Promise<void> {
+    const lines = text.split('\n');
+    const W = 900, pad = 64;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const styles = getComputedStyle(document.documentElement);
+    const bg = styles.getPropertyValue('--surface-alt').trim() || '#ffffff';
+    const ink = styles.getPropertyValue('--ink').trim() || '#111111';
+    const soft = styles.getPropertyValue('--ink-soft').trim() || '#666666';
 
+    const heights = lines.map((l) => (/[🟩🟨🟡🟠]/.test(l) ? 74 : l ? 52 : 26));
+    canvas.width = W;
+    canvas.height = pad * 2 + heights.reduce((a, b) => a + b, 0);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.textAlign = 'center';
+    let y = pad;
+    lines.forEach((line, i) => {
+      y += heights[i];
+      if (!line) return;
+      const isGrid = /[🟩🟨🟡🟠]/.test(line);
+      ctx.font = isGrid ? '58px system-ui, sans-serif'
+        : i === 0 ? 'bold 40px system-ui, sans-serif' : '30px system-ui, sans-serif';
+      ctx.fillStyle = i === 0 || isGrid ? ink : soft;
+      ctx.fillText(line, W / 2, y - 12);
+    });
 
-
+    const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+    if (!blob) return;
+    const name = `${this.theme.id}-${this.edition.date ?? 'board'}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    // Sharing the file directly beats a download on a phone, which is where it is wanted.
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file] }).catch(() => { /* dismissed */ });
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  }
 
   paintModes() {
     const modes: [Mode, string][] = [
@@ -1108,6 +1260,29 @@ class App {
     shell(body);
   }
 
+  /** Flavour lines go only to resolved cards that were holding no clue — about four in
+   *  ten of them — and only to a third of those, so the board never turns chatty. The
+   *  deal is seeded, so two people on the same board hear the same asides. */
+  private flavourFor(i: number): string {
+    const p = this.session.puzzle;
+    const key = `${p.labelSeed}|${this.prefs.locale}|${this.theme.id}`;
+    if (key !== this.flavourKey) {
+      this.flavourKey = key;
+      this.flavourDeal.clear();
+      const lines = this.theme.strings[this.prefs.locale].flavour ?? [];
+      if (lines.length) {
+        const gated = new Set(p.clues.map((c) => c.gate).filter((g): g is number => g !== null));
+        const empty: number[] = [];
+        for (let n = 0; n < p.n; n++) if (!gated.has(n)) empty.push(n);
+        const rng = makeRng(`${key}|flavour`);
+        const chosen = rng.shuffle(empty).slice(0, Math.round(empty.length / 3));
+        const pool = rng.shuffle([...lines]);
+        chosen.forEach((cell, k) => this.flavourDeal.set(cell, pool[k % pool.length]));
+      }
+    }
+    return this.flavourDeal.get(i) ?? '';
+  }
+
   /* ---------------- the tile sheet ---------------- */
 
   /** One square, opened. A no-guess board should never make you tap and find out, so the
@@ -1121,7 +1296,6 @@ class App {
     const knownA = (this.session.knownA >> i) & 1;
     const known = !!(knownB || knownA);
     const d = this.session.deduction();
-    const decidable = !!(((d.forcedA | d.forcedB) >> i) & 1);
 
     const ov = $('#overlay');
     ov.innerHTML = '';
@@ -1143,34 +1317,20 @@ class App {
 
     if (known) {
       card.appendChild(el('p', 'sheet-note', knownB ? B_.name : A_.name));
-    } else if (!decidable) {
-      card.appendChild(el('p', 'sheet-note', this.ui.notDeducible));
-      const hits = this.session.activeClues().filter((pc) => this.session.touches(pc.clue).includes(i));
-      for (const pc of hits.slice(0, 3)) {
-        card.appendChild(el('p', 'sheet-clue', renderClue(this.loc, this.theme, ctx, pc.clue, pc.order)));
-      }
     }
 
     if (!known) {
       const row = el('div', 'sheet-choices');
       row.appendChild(el('span', 'sheet-prompt', this.ui.markAs));
       for (const [cls, st, state] of [['pick-a', A_, 0], ['pick-b', B_, 1]] as const) {
+        // Both are always offered. Being told "no" and why is how you learn what you
+        // missed; a greyed-out button teaches nothing and answers the question for you.
         const btn = el('button', cls, st.name) as HTMLButtonElement;
-        btn.disabled = !decidable;
         btn.onclick = () => { this.closeSheet(); void this.flip(i, state as State); };
         row.appendChild(btn);
       }
       card.appendChild(row);
 
-      // pencil marks were long-press only, which is a poor thing to discover on a phone
-      const pencils = el('div', 'sheet-pencils');
-      TAG_COLOURS.forEach((colour, n) => {
-        const dot = el('i', (n === 0 ? 'none ' : '') + (this.pencils[i] === n ? 'on' : ''));
-        if (n > 0) dot.style.background = colour;
-        dot.onclick = () => { this.pencils[i] = n as Pencil; this.render(); this.openTile(i); };
-        pencils.appendChild(dot);
-      });
-      card.appendChild(pencils);
     }
 
     const foot = el('div', 'sheet-close');
@@ -1183,6 +1343,41 @@ class App {
     ov.classList.add('on');
     ov.onclick = (e) => { if (e.target === ov) this.closeSheet(); };
     this.sheetCell = i;
+  }
+
+  /** A refusal is the most useful thing this game says. It names the person, names what
+   *  you tried to prove, and says exactly why it does not follow — and it offers the
+   *  board to somebody else at the one moment a player actually wants help. */
+  showRefusal(i: number, tried: State) {
+    const ctx = renderContext(this.theme, this.prefs.locale, this.session.puzzle);
+    const label = ctx.labels[i];
+    const triedS = tried === 1 ? this.strings.states.b : this.strings.states.a;
+    const otherS = tried === 1 ? this.strings.states.a : this.strings.states.b;
+    const fill = (t: string, pred: string) =>
+      t.replace(/\{name\}/g, label.text).replace('{pred}', pred).replace('{other}', pred);
+
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'sheet refusal');
+    card.appendChild(el('h3', '', this.ui.refuseTitle));
+    card.appendChild(el('p', 'refuse-body', fill(this.ui.refuseBody, agree(triedS.pred, label.g, false))));
+    card.appendChild(el('p', 'refuse-why', fill(this.ui.refuseWhy, agree(otherS.pred, label.g, false))));
+    const row = el('div', 'refuse-actions');
+    const share = el('button', '', this.ui.refuseShare);
+    share.onclick = () => { this.closeSheet(); void this.shareScenario(); };
+    const go = el('button', 'primary', this.ui.refuseGo);
+    go.onclick = () => this.closeSheet();
+    row.appendChild(share); row.appendChild(go);
+    card.appendChild(row);
+    ov.appendChild(card);
+    ov.classList.add('on');
+    ov.onclick = (e) => { if (e.target === ov) this.closeSheet(); };
+    this.sheetCell = null;
+  }
+
+  cyclePencil(i: number) {
+    this.pencils[i] = ((this.pencils[i] + 1) % PENCIL_STATES) as Pencil;
+    this.paintBoard();
   }
 
   closeSheet() {
@@ -1346,7 +1541,9 @@ class App {
     select('hintButton', S.hintButton, [['enabled', S.enabled], ['confirm', S.confirm], ['disabled', S.disabled]]);
     select('appearance', S.appearance, [['theme', S.followTheme], ['dark', S.dark], ['light', S.light]]);
     select('colorMode', S.colorMode, [['normal', S.normal], ['contrast', S.highContrast], ['colorblind', S.colorblind]]);
-    select('showTimer', S.showTimer, [['always', S.always], ['onSolve', S.onSolve], ['never', S.never]]);
+    select('showFlavour', S.showFlavour, [['normal', S.normal], ['dimmed', S.dimmed], ['hidden', S.hidden]]);
+    select('showSolvable', S.showSolvable, [['onHint', S.onHint], ['always', S.always], ['never', S.never]]);
+    select('showTimer', S.showTimer, [['onSolve', S.onSolve], ['always', S.always], ['never', S.never]]);
     select('showLeaderboard', S.showLeaderboard, [['always', S.always], ['onSolve', S.onSolve], ['never', S.never]]);
     check('tileArt', S.tileArt);
     check('reduceMotion', S.reduceMotion);

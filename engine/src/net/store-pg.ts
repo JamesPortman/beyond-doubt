@@ -78,6 +78,21 @@ export class PostgresStore implements Store {
     `);
   }
 
+  async standing(editionId: string, userId: string): Promise<{ ahead: number; total: number; perfect: number }> {
+    const mine = await this.one('SELECT time_ms FROM results WHERE edition_id = $1 AND user_id = $2', [editionId, userId]);
+    const mineMs = (mine as { time_ms?: string | number } | undefined)?.time_ms;
+    const row = await this.one(
+      `SELECT COUNT(*) AS total,
+              COUNT(*) FILTER (WHERE perfect = 1) AS perfect,   -- INT here, not BOOLEAN
+              COUNT(*) FILTER (WHERE time_ms < $1) AS ahead
+         FROM results WHERE edition_id = $2`,
+      [mineMs === undefined || mineMs === null ? Number.MAX_SAFE_INTEGER : Number(mineMs), editionId],
+    );
+    // every aggregate comes back as a string from pg, as everywhere else in this file
+    const r = (row ?? {}) as Record<string, string | number>;
+    return { ahead: Number(r.ahead ?? 0), total: Number(r.total ?? 0), perfect: Number(r.perfect ?? 0) };
+  }
+
   /* ---------- operator settings ---------- */
 
   async getSetting(key: string): Promise<string | undefined> {

@@ -58,6 +58,10 @@ export interface ThemeLocale {
   labels: LabelSpec[];
   /** optional voice prefixes applied deterministically, e.g. "Pursuant to §4.2," */
   flourishes?: string[];
+  /** Lines that carry no logic at all, dealt to resolved tiles that were holding no
+   *  clue. They give the cast a voice — and they are a small hazard by design, because
+   *  noticing that a card says nothing is part of reading the board. */
+  flavour?: string[];
 }
 
 /** A localized noun phrase for a selector, carrying what agreement needs. */
@@ -98,6 +102,8 @@ export interface SettingsStrings {
   tagSide: string; left: string; right: string;
   autoClearPencil: string;
   usedClues: string; normal: string; dim: string; hide: string;
+  showFlavour: string; dimmed: string; hidden: string;
+  showSolvable: string; onHint: string;
   hintButton: string; enabled: string; confirm: string; disabled: string;
   appearance: string; followTheme: string; dark: string; light: string;
   colorMode: string; highContrast: string; colorblind: string;
@@ -169,6 +175,11 @@ export interface UiStrings {
   perfect: string; solvedIn: string; weeklyTotal: string; complete: string;
   timePenalty: string;
   mistakeCost: string; adjustedTime: string;
+  /** The refusal. {name} and {pred} are filled in; {pred} already agrees with the name. */
+  refuseTitle: string; refuseBody: string; refuseWhy: string; refuseShare: string; refuseGo: string;
+  shareCopy: string; shareSend: string; shareImage: string;
+  /** {n} is filled in */
+  percentileTop: string; perfectShare: string;
   settings: SettingsStrings;
   inspect: InspectStrings;
   actions: ActionStrings;

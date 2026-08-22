@@ -59,6 +59,9 @@ export interface Store {
   board(editionId: string, limit: number): Promise<(ResultRow & { display_name: string })[]>;
   weekBoard(weekId: string, limit: number): Promise<WeekRow[]>;
   rankOf(editionId: string, userId: string): Promise<number | null>;
+  /** How this user's run compares with everyone else who finished the same edition:
+   *  [their position by adjusted time, total finishers, how many were perfect]. */
+  standing(editionId: string, userId: string): Promise<{ ahead: number; total: number; perfect: number }>;
   streak(userId: string, isoDates: string[]): Promise<number>;
   resultsByEdition(userId: string, editionIds: string[]): Promise<Map<string, ResultRow>>;
   createRoom(r: RoomRow): Promise<void>;
@@ -126,6 +129,20 @@ export class SqliteStore implements Store {
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
     `);
+  }
+
+  /** One pass over the edition's finishers. `ahead` counts strictly faster runs, so the
+   *  fastest solver is 0 ahead and lands in the top band. */
+  async standing(editionId: string, userId: string): Promise<{ ahead: number; total: number; perfect: number }> {
+    const mine = this.db.prepare('SELECT time_ms FROM results WHERE edition_id = ? AND user_id = ?')
+      .get(editionId, userId) as { time_ms?: number } | undefined;
+    const row = this.db.prepare(
+      `SELECT COUNT(*) AS total,
+              SUM(CASE WHEN perfect = 1 THEN 1 ELSE 0 END) AS perfect,
+              SUM(CASE WHEN time_ms < ? THEN 1 ELSE 0 END) AS ahead
+         FROM results WHERE edition_id = ?`,
+    ).get(mine?.time_ms ?? Number.MAX_SAFE_INTEGER, editionId) as { total: number; perfect: number; ahead: number };
+    return { ahead: Number(row?.ahead ?? 0), total: Number(row?.total ?? 0), perfect: Number(row?.perfect ?? 0) };
   }
 
   /* ---------- operator settings ---------- */

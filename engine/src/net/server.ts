@@ -52,6 +52,20 @@ export function publicFlags(f: Flags): P.PublicFlags {
   return { themes: f.themes, archive: f.archive, weekly: f.weekly, free: f.free, rooms: f.rooms, notice: f.notice };
 }
 
+/** Turn a raw standing into the two numbers a player is told.
+ *
+ *  Bands rather than an exact rank, for two reasons: an exact position is noise when
+ *  four people have played, and a band is the thing worth posting. Both come back null
+ *  until enough people have finished for the number to mean anything — a "top 1%" out
+ *  of three solvers is a lie told with arithmetic. */
+const MIN_FINISHERS = 20;
+export function bands(st: { ahead: number; total: number; perfect: number }): { percentile: number | null; perfectRate: number | null } {
+  if (st.total < MIN_FINISHERS) return { percentile: null, perfectRate: null };
+  const pct = (st.ahead / st.total) * 100;
+  const band = [1, 5, 10, 25, 50].find((b) => pct <= b) ?? null;
+  return { percentile: band, perfectRate: Math.round((st.perfect / st.total) * 100) };
+}
+
 export class GameServer {
   store: Store;
   private opts: Required<Omit<ServerOptions, 'staticDir' | 'store'>> & { staticDir?: string };
@@ -218,7 +232,7 @@ export class GameServer {
     const code = String(randomInt(100000, 1000000));
     await this.store.putAuthCode(email, code, this.now() + CODE_TTL);
     if (!this.opts.dev) {
-      await this.opts.sendEmail(email, 'Your Clues sign-in code',
+      await this.opts.sendEmail(email, 'Your Beyond Doubt sign-in code',
         `Your code is ${code}. It expires in ten minutes.`);
       return { sent: true };
     }
@@ -335,6 +349,7 @@ export class GameServer {
         mistakes: session.mistakes, score: s.score, perfect: s.perfect, ranked,
         rank: ranked ? await this.store.rankOf(row.edition_id, user.id) : null,
         streak: await this.store.streak(user.id, dates),
+        ...bands(await this.store.standing(row.edition_id, user.id)),
       };
       this.live.delete(b.playId);
     }

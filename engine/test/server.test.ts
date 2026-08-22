@@ -1,7 +1,7 @@
 import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameServer } from '../src/net/server.js';
+import { GameServer, bands } from '../src/net/server.js';
 import { Session } from '../src/core/session.js';
 import { bits } from '../src/core/grid.js';
 import { State } from '../src/core/clue.js';
@@ -617,4 +617,34 @@ test('rooms can be closed', async () => {
   clk.advance(10_000);
   await assert.rejects(() => srv.roomJoin(user, { mode: 'daily', themeId: 'orchard' }),
     (e: any) => e.code === 'rooms-disabled');
+});
+
+test('percentile bands stay silent until the numbers mean something', () => {
+  // a "top 1%" out of three solvers is a lie told with arithmetic
+  assert.deepEqual(bands({ ahead: 0, total: 3, perfect: 3 }), { percentile: null, perfectRate: null });
+  assert.deepEqual(bands({ ahead: 0, total: 19, perfect: 0 }), { percentile: null, perfectRate: null });
+
+  // the fastest solver is 0 ahead and lands in the top band
+  assert.equal(bands({ ahead: 0, total: 100, perfect: 10 }).percentile, 1);
+  assert.equal(bands({ ahead: 4, total: 100, perfect: 10 }).percentile, 5);
+  assert.equal(bands({ ahead: 24, total: 100, perfect: 10 }).percentile, 25);
+  assert.equal(bands({ ahead: 60, total: 100, perfect: 10 }).percentile, null, 'no band for the back half');
+  assert.equal(bands({ ahead: 0, total: 100, perfect: 7 }).perfectRate, 7);
+});
+
+test('a finished run reports where it placed against everyone else', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'solo@b.co');
+  const user = await userOf(srv, token);
+  const s = await srv.start(user, { mode: 'daily', themeId: 'gallery' });
+  const r = await playHonestly(srv, token, s.playId, s.view, 500, clk);
+  const res = r.last?.result;
+  assert.ok(res, 'the run finished and returned a result');
+  // one finisher is not a population: both numbers stay null rather than claiming 100%
+  assert.equal(res.percentile, null);
+  assert.equal(res.perfectRate, null);
+  const st = await srv.store.standing(res.editionId, user.id);
+  assert.equal(st.total, 1);
+  assert.equal(st.ahead, 0, 'you are not ahead of yourself');
 });

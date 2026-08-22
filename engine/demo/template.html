@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clues — a daily deduction puzzle</title>
+<title>Beyond Doubt — a daily deduction puzzle</title>
   <meta name="description" content="A daily logic puzzle in seven settings and three languages. Every clue is true, and you are never asked to guess.">
   <meta name="theme-color" content="#f0e7d4">
-  <meta property="og:title" content="Clues — a daily deduction puzzle">
+  <meta property="og:title" content="Beyond Doubt — a daily deduction puzzle">
   <meta property="og:description" content="Seven games, three languages, one rule: you are never asked to guess.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
@@ -131,6 +131,26 @@
   .cell-tag{display:block;font-size:8cqh;letter-spacing:.005em;text-transform:none;opacity:.78;
     font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:.5cqh}
   .cell-tag::first-letter{text-transform:uppercase}
+  /* Every clue is held by a person and prints on their card the moment they are
+     resolved, so the board IS the clue list. This is the single biggest structural
+     difference from the panel it replaces: no scrolling between board and clues. */
+  .cell-clue{
+    position:absolute;left:0;right:0;bottom:0;height:34cqh;overflow:hidden;z-index:2;
+    display:flex;align-items:center;justify-content:center;text-align:center;
+    padding:0 5cqw;font-size:6.6cqh;line-height:1.22;font-weight:600;
+    background:color-mix(in srgb, var(--tile-ink) 86%, var(--accent));
+    color:var(--tile);cursor:pointer
+  }
+  .cell.has-clue .cap{bottom:34cqh}
+  .cell-clue.done{opacity:.38;font-weight:500}
+  .cell-clue.picked{background:var(--accent);color:var(--bg)}
+  /* A flavour line is not information. It reads as an aside so nobody hunts it for logic. */
+  .cell-clue.flavour{font-style:italic;font-weight:500;opacity:.7;
+    background:color-mix(in srgb, var(--tile-ink) 86%, transparent)}
+  body[data-flavour="dimmed"] .cell-clue.flavour{opacity:.4}
+  body[data-flavour="hidden"] .cell-clue.flavour{display:none}
+  body[data-flavour="hidden"] .cell.has-flavour .cap{bottom:0}
+  #clues .clue-head{margin-top:0}
   body[data-label-mode="artwork"] .cell-name{
     font-size:12cqh;letter-spacing:-.01em;text-shadow:none}
   body[data-label-mode="artwork"] .cell-tag{font-size:7.6cqh;opacity:.7}
@@ -138,9 +158,12 @@
      its labels on the painting anyway: this is the card under the picture. */
   body[data-label-mode="artwork"] .cap{
     padding:0 4cqw;background:var(--tile-ink);backdrop-filter:none}
+  /* Sized against the tile, not the page: the card now carries a picture, a label and
+     a clue, and a chip fixed in rem swamped all three on a phone. */
   .cell-state{
-    position:absolute;top:7px;right:var(--tag-right,7px);left:var(--tag-left,auto);font-size:.66rem;letter-spacing:.06em;text-transform:uppercase;
-    padding:3px 7px;border-radius:3px;background:var(--tile-ink);color:var(--tile);font-weight:700
+    position:absolute;top:3cqh;right:var(--tag-right,3cqw);left:var(--tag-left,auto);
+    font-size:6.4cqh;letter-spacing:.05em;text-transform:uppercase;
+    padding:1cqh 2.4cqw;border-radius:3px;background:var(--tile-ink);color:var(--tile);font-weight:700
   }
   /* A decidable square used to be flagged by a 6px dot in the corner, which is a lot to
      ask of a player scanning twenty tiles on a phone. The whole square lights instead:
@@ -166,9 +189,15 @@
   .cell.is-b .cell-state{background:var(--state-b);color:#fff}
   .cell.known{filter:saturate(.92)}
   .cell.lit{box-shadow:0 0 0 2px var(--accent), 0 0 22px var(--glow)}
-  /* working tags sit in the opposite corner from the result chip so they never collide */
-  .tile-tag{position:absolute;top:6px;left:7px;width:14px;height:14px;border-radius:50%;
-    box-shadow:0 1px 3px rgba(0,0,0,.5), inset 0 0 0 2px rgba(255,255,255,.5);z-index:2}
+  /* The working mark is a corner of the card itself. It only ever appears on an
+     unresolved card, so it never collides with the result chip that takes the same
+     corner once the square is decided. */
+  .tile-tag{position:absolute;top:0;width:26cqw;height:26cqw;z-index:3;cursor:pointer}
+  body[data-tag-side="left"] .tile-tag{left:0;clip-path:polygon(0 0,100% 0,0 100%)}
+  body:not([data-tag-side="left"]) .tile-tag{right:0;clip-path:polygon(100% 0,100% 100%,0 0)}
+  .tile-tag.t0{background:color-mix(in srgb, var(--tile-ink) 24%, transparent)}
+  .tile-tag.t1{background:var(--state-a)}
+  .tile-tag.t2{background:var(--state-b)}
 
   .cell.shake{animation:sh .35s}
   body[data-motion="reduced"] .cell.shake{animation:none;outline:2px solid var(--state-b)}
@@ -290,6 +319,32 @@
     background:color-mix(in srgb, var(--accent) 12%, transparent);color:var(--ink);
     font-size:.92rem;line-height:1.45}
 
+  /* The clue that just landed. It arrives at the top and pushes the rest down, so the
+     newest thing to know is always in the same place rather than wherever the board
+     happened to put it. */
+  .clue.fresh{border-left-color:var(--accent);
+    background:color-mix(in srgb, var(--accent) 14%, transparent)}
+  @media (prefers-reduced-motion: no-preference) {
+    .clue.fresh{animation:clue-in .28s ease-out}
+  }
+  @keyframes clue-in{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+
+  /* The grid is the share: what you post is exactly what the card showed you. */
+  .result-grid{margin:14px auto 10px;font-size:1.5rem;line-height:1.18;letter-spacing:.06em;
+    font-family:system-ui,"Segoe UI Emoji","Apple Color Emoji",sans-serif}
+  .result-share{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0 10px}
+  .result-share button{flex:1 1 auto;min-width:112px;padding:10px 12px;font-size:.92rem}
+
+  /* ---------- the refusal ---------- */
+  .sheet.refusal{width:min(380px,90vw);text-align:center}
+  .sheet.refusal h3{color:var(--state-b);margin:24px 0 6px}
+  .refuse-body{margin:0 24px 12px;font-size:1.02rem;line-height:1.45;color:var(--ink);font-weight:600}
+  .refuse-why{margin:0 24px 4px;font-size:.92rem;line-height:1.5;color:var(--ink-soft)}
+  .refuse-actions{display:flex;gap:10px;justify-content:center;padding:20px 22px 22px;margin-top:16px;
+    background:color-mix(in srgb, var(--ink) 6%, transparent)}
+  .refuse-actions button{flex:1;padding:12px 8px;font-size:.95rem;font-weight:600;border-radius:6px}
+  .refuse-actions .primary{background:var(--accent);border-color:var(--accent);color:var(--bg)}
+
   /* ---------- admin ---------- */
   .sheet.admin{width:min(420px,92vw);text-align:left;max-height:86vh;overflow:auto}
   .sheet.admin h3{text-align:center}
@@ -327,11 +382,6 @@
   .sheet-choices .pick-a{background:var(--state-a)}
   .sheet-choices .pick-b{background:var(--state-b)}
   .sheet-choices button:disabled{opacity:.38;cursor:not-allowed}
-  .sheet-pencils{display:flex;gap:9px;justify-content:center;padding:14px 0 0}
-  .sheet-pencils i{width:22px;height:22px;border-radius:50%;cursor:pointer;
-    box-shadow:inset 0 0 0 2px rgba(255,255,255,.55),0 1px 3px rgba(0,0,0,.4)}
-  .sheet-pencils i.none{background:transparent;box-shadow:inset 0 0 0 2px var(--line)}
-  .sheet-pencils i.on{outline:2px solid var(--accent);outline-offset:2px}
   .sheet-close{padding:16px 0 20px}
 
   /* ---------- per-theme skin flourishes: the artwork carries the rest ---------- */
@@ -357,6 +407,7 @@
   .skin-plate19 .cell.is-b{box-shadow:inset 0 0 0 3px var(--state-b), inset 0 0 26px var(--glow)}
 
   .skin-guestlist .cell{border-radius:2px;box-shadow:0 2px 6px rgba(0,0,0,.45)}
+  .skin-guestlist .cell.has-clue::after{bottom:calc(59cqh + 4px)}
   .skin-guestlist .cell::after{content:"";position:absolute;inset:4px;bottom:calc(25cqh + 4px);
     border:1px solid rgba(217,164,65,.42);pointer-events:none;border-radius:1px}
   .skin-guestlist .cell-name{letter-spacing:.07em}
@@ -389,9 +440,9 @@
       <div id="board"></div>
       <div id="actions"></div>
       <div id="status">
-        <div class="stat"><b id="time">0:00</b><span id="timeL">Time</span></div>
         <div class="stat"><b id="prog">0/16</b><span>Board</span></div>
-        <div class="stat"><b id="mist">0</b><span id="mistL">Mistakes</span><span id="mistCost" class="stat-note"></span></div>
+        <div class="stat"><b id="mist">0</b><span id="mistL">Mistakes</span></div>
+        <div class="stat" id="timeStat"><b id="time">0:00</b><span id="timeL">Time</span></div>
         <div class="stat"><b id="hints">0</b><span id="hintsL">Hints</span></div>
         <div class="stat"><b id="diff">—</b><span>&nbsp;</span></div>
         <div class="stat"><b id="ranked">○ local</b><span>&nbsp;</span></div>

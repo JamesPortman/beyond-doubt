@@ -9,6 +9,11 @@ export type Appearance = 'theme' | 'dark' | 'light';
 export type ColorMode = 'normal' | 'contrast' | 'colorblind';
 export type Visibility = 'always' | 'onSolve' | 'never';
 export type UsedClues = 'normal' | 'dim' | 'hide';
+export type FlavourMode = 'normal' | 'dimmed' | 'hidden';
+/** Whether the board tells you which square is currently decidable. Advertising it for
+ *  free removes a real part of the puzzle — working out WHERE to look — so the default
+ *  is to reveal it only when a hint is spent on it. */
+export type SolvableMode = 'never' | 'onHint' | 'always';
 export type HintMode = 'enabled' | 'confirm' | 'disabled';
 export type Side = 'right' | 'left';
 
@@ -20,6 +25,8 @@ export interface Settings {
   autoClearPencil: boolean;
   /** what happens to a clue you have ticked off */
   usedClues: UsedClues;
+  showFlavour: FlavourMode;
+  showSolvable: SolvableMode;
   hintButton: HintMode;
   appearance: Appearance;
   colorMode: ColorMode;
@@ -36,10 +43,12 @@ export const DEFAULT_SETTINGS: Settings = {
   tagSide: 'right',
   autoClearPencil: true,
   usedClues: 'dim',
+  showFlavour: 'normal',
+  showSolvable: 'onHint',
   hintButton: 'enabled',
   appearance: 'theme',
   colorMode: 'normal',
-  showTimer: 'always',
+  showTimer: 'onSolve',
   showLeaderboard: 'always',
   tileArt: true,
   reduceMotion: false,
@@ -70,10 +79,12 @@ export function sanitize(s: Partial<Settings>): Settings {
     tagSide: pick(s.tagSide, ['right', 'left'] as const, 'right'),
     autoClearPencil: bool(s.autoClearPencil, true),
     usedClues: pick(s.usedClues, ['normal', 'dim', 'hide'] as const, 'dim'),
+    showFlavour: pick(s.showFlavour, ['normal', 'dimmed', 'hidden'] as const, 'normal'),
+    showSolvable: pick(s.showSolvable, ['never', 'onHint', 'always'] as const, 'onHint'),
     hintButton: pick(s.hintButton, ['enabled', 'confirm', 'disabled'] as const, 'enabled'),
     appearance: pick(s.appearance, ['theme', 'dark', 'light'] as const, 'theme'),
     colorMode: pick(s.colorMode, ['normal', 'contrast', 'colorblind'] as const, 'normal'),
-    showTimer: pick(s.showTimer, ['always', 'onSolve', 'never'] as const, 'always'),
+    showTimer: pick(s.showTimer, ['always', 'onSolve', 'never'] as const, 'onSolve'),
     showLeaderboard: pick(s.showLeaderboard, ['always', 'onSolve', 'never'] as const, 'always'),
     tileArt: bool(s.tileArt, true),
     reduceMotion: bool(s.reduceMotion, false),

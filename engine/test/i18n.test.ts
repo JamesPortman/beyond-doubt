@@ -20,6 +20,9 @@ const ROOT = (() => {
   throw new Error('package.json not found above the test file');
 })();
 import { tileArt } from '../src/render/art.js';
+import { resultGrid, glyphFor, shareText, shareTime } from '../src/core/share.js';
+import { Session } from '../src/core/session.js';
+import type { State } from '../src/core/clue.js';
 import { getLocale } from '../src/i18n/index.js';
 import { ALL_LOCALES } from '../src/i18n/locales.js';
 
@@ -317,4 +320,87 @@ test('a theme backed by real artwork deals pictures without repeating', () => {
   const drawn = THEMES.find((t) => !t.images);
   assert.ok(drawn, 'at least one theme should still be drawn rather than photographed');
   assert.ok(tileArt({ theme: drawn, index: 0, labelSeed: puzzle.labelSeed }).startsWith('<svg'));
+});
+
+/* ------------------------------------------------------------------ *
+ * The result grid. The thing worth pinning is that it says how you
+ * won each square and never what the answer was.
+ * ------------------------------------------------------------------ */
+
+test('the result grid records how a square was won, never what it was', () => {
+  const w = 4, h = 5, n = w * h;
+  const misses = new Array(n).fill(0);
+  const hints = new Array(n).fill(0);
+  misses[1] = 2; hints[2] = 1; hints[3] = 2; misses[3] = 1;
+
+  const grid = resultGrid({ w, h, missesByCell: misses, hintedByCell: hints });
+  const rows = grid.split('\n');
+  assert.equal(rows.length, h);
+  assert.equal([...rows[0]].length, w, 'one glyph per square');
+  assert.equal([...rows[0]].join(''), '🟩🟨🟡🟠');
+  // a square that was both missed and hinted shows the hint: the larger concession wins
+  assert.equal(glyphFor(9, 2), '🟠');
+  assert.equal(glyphFor(9, 1), '🟡');
+  assert.equal(glyphFor(1, 0), '🟨');
+  assert.equal(glyphFor(0, 0), '🟩');
+
+  // a clean run is entirely green, and nothing in the output distinguishes the two states
+  const clean = resultGrid({ w, h });
+  assert.equal(clean.replace(/\n/g, ''), '🟩'.repeat(n));
+  const text = shareText({
+    w, h, title: 'Auction Night', edition: '21 Aug 2026',
+    elapsedMs: 252_000, addedMs: 120_000, url: 'https://example.test',
+    missesByCell: misses, hintedByCell: hints,
+  });
+  assert.match(text, /^Auction Night — 21 Aug 2026\n4:12 \(\+2:00\)\n\n/);
+  assert.match(text, /https:\/\/example\.test$/);
+  for (const leak of [/sold/i, /available/i, /criminal/i, /innocent/i, /\bA\d\b/]) {
+    assert.ok(!leak.test(text), `the share text must not carry the answer -> ${text}`);
+  }
+  assert.equal(shareTime(0), '0:00');
+  assert.equal(shareTime(59_600), '1:00');
+  assert.equal(shareTime(3_725_000), '1:02:05');
+});
+
+test('a session records which squares were missed and which were hinted', () => {
+  const theme = THEMES[0];
+  const puzzle = generate({ seed: 'marks', difficulty: 4, tagSchema: theme.tagSchema });
+  const s = new Session({ puzzle, now: () => 0 });
+
+  // spend both hint levels; the cell hint must be recorded as the double it was
+  const first = s.hint();
+  assert.equal(first.kind, 'clue');
+  const second = s.hint();
+  assert.equal(second.kind, 'cell');
+  assert.equal(s.hintedByCell[second.cell!], 2, 'a cell hint after a clue hint is a double');
+
+  // answer that same square the wrong way round: a miss lands on that square only
+  const wrong: State = second.state === 1 ? 0 : 1;
+  assert.equal(s.mark(second.cell!, wrong).outcome, 'wrong');
+  assert.equal(s.missesByCell[second.cell!], 1);
+  assert.equal(s.missesByCell.filter(Boolean).length, 1, 'no other square is marked');
+
+  // a refusal on an undecidable square is not a mistake, and marks nothing
+  const undecided = [...Array(puzzle.n).keys()].find((i) => {
+    const d = s.deduction();
+    return !((d.forcedA | d.forcedB) >> i & 1) && !((s.known >> i) & 1);
+  })!;
+  const before = s.mistakes;
+  assert.equal(s.mark(undecided, 1).outcome, 'not-deducible');
+  assert.equal(s.mistakes, before, 'refusing a guess is not a mistake');
+  assert.equal(s.missesByCell[undecided] ?? 0, 0);
+});
+
+test('a second hint press names a square instead of repeating the clue', () => {
+  const theme = THEMES[0];
+  const puzzle = generate({ seed: 'escalate', difficulty: 5, tagSchema: theme.tagSchema });
+  const s = new Session({ puzzle, now: () => 0, hintBudget: 9 });
+  const a = s.hint();
+  const b = s.hint();
+  assert.equal(a.kind, 'clue');
+  assert.equal(b.kind, 'cell', 'pressing again must escalate, not resell the same clue');
+
+  // making a move resets the ladder: the next press is a clue again
+  s.mark(b.cell!, b.state!);
+  assert.equal(s.hint().kind, 'clue');
 });

@@ -78,6 +78,11 @@ export interface RunResult {
   /** where this run placed on the edition board, 1-based; null if unranked */
   rank: number | null;
   streak: number;
+  /** Rounded percentile band by adjusted time — 1, 5, 10, 25 or 50 — or null when the
+   *  edition has too few finishers for the number to mean anything. */
+  percentile?: number | null;
+  /** what share of finishers solved this edition with no mistakes and no hints */
+  perfectRate?: number | null;
 }
 
 /* ------------------------------- rooms ------------------------------- */
