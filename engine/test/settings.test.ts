@@ -11,6 +11,7 @@ import {
   DEFAULT_SETTINGS, Settings, sanitize, resolvePalette, cssVars,
   contrast, luminance, Appearance, ColorMode,
 } from '../src/render/settings.js';
+import { scoreRun } from '../src/core/scoring.js';
 
 const APPEARANCES: Appearance[] = ['theme', 'dark', 'light'];
 const MODES: ColorMode[] = ['normal', 'contrast', 'colorblind'];
@@ -198,4 +199,27 @@ test('every UI string is present and non-empty in every language', () => {
       }
     }
   }
+});
+
+test('a mistake costs a minute on the clock, not an abstract points deduction', () => {
+  const clean = scoreRun({ difficulty: 4, elapsedMs: 120_000, hintsUsed: 0, mistakes: 0 });
+  const oneWrong = scoreRun({ difficulty: 4, elapsedMs: 120_000, hintsUsed: 0, mistakes: 1 });
+  const slower = scoreRun({ difficulty: 4, elapsedMs: 180_000, hintsUsed: 0, mistakes: 0 });
+
+  assert.equal(oneWrong.timeAddedMs, 60_000);
+  assert.equal(oneWrong.effectiveMs, 180_000);
+  // the whole point: one mistake is worth exactly one minute, no more and no less
+  assert.equal(oneWrong.score, slower.score,
+    'a mistake should score identically to simply having taken a minute longer');
+  assert.ok(oneWrong.score < clean.score);
+  assert.equal(clean.timeAddedMs, 0);
+
+  // and it scales — a minute hurts more on a fast Monday than on a long Sunday
+  const mondayCost = scoreRun({ difficulty: 1, elapsedMs: 60_000, hintsUsed: 0, mistakes: 0 }).score
+    - scoreRun({ difficulty: 1, elapsedMs: 60_000, hintsUsed: 0, mistakes: 1 }).score;
+  const sundayCost = scoreRun({ difficulty: 7, elapsedMs: 400_000, hintsUsed: 0, mistakes: 0 }).score
+    - scoreRun({ difficulty: 7, elapsedMs: 400_000, hintsUsed: 0, mistakes: 1 }).score;
+  assert.ok(mondayCost > sundayCost,
+    `a minute should cost more on Monday (${mondayCost}) than Sunday (${sundayCost})`);
+  assert.ok(sundayCost > 0, 'but it must still cost something');
 });

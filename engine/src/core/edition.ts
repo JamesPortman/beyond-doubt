@@ -20,6 +20,48 @@ export interface EditionRef {
   seed: string;
 }
 
+/** The clock the game runs on. A daily puzzle has to roll over at a time that means
+ *  something to the people playing it, and UTC means the "new" board arrived at 8pm the
+ *  evening before. Everything a player experiences as "today" is resolved in this zone;
+ *  stored timestamps stay absolute. */
+export const GAME_TZ = 'America/Toronto';
+
+/** The civil date in a zone — what the calendar on the wall says at that instant.
+ *  en-CA formats as YYYY-MM-DD, which is the shape every comparison in this codebase
+ *  already assumes. DST is the platform's problem, which is the point of using Intl. */
+export function civilDate(at: Date, tz: string = GAME_TZ): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(at);
+}
+
+/** A civil date as a Date fixed at midday UTC. Noon is deliberate: every existing helper
+ *  reads UTC parts, and midday is far enough from either boundary that no offset can
+ *  push it into the wrong day. */
+export function civilNoon(iso: string): Date {
+  return new Date(`${iso}T12:00:00Z`);
+}
+
+/** "Today" for the game: the board a player in the game's timezone should be handed. */
+export function gameToday(at: Date, tz: string = GAME_TZ): Date {
+  return civilNoon(civilDate(at, tz));
+}
+
+/** Civil-day arithmetic. Doing this by subtracting 86,400,000ms from an instant looks
+ *  equivalent and is not: on the two days a year the clocks move, that lands in the same
+ *  civil day twice and skips its neighbour — which, for a streak, silently invents a day
+ *  the player never played. Anchoring at noon UTC and stepping in UTC has no such seam. */
+export function shiftDays(iso: string, days: number): string {
+  return isoDate(new Date(civilNoon(iso).getTime() + days * 86400_000));
+}
+
+/** The `n` civil days ending at `iso`, most recent first. */
+export function daysBack(iso: string, n: number): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < n; i++) out.push(shiftDays(iso, -i));
+  return out;
+}
+
 export function isoDate(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }

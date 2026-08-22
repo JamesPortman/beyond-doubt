@@ -57,14 +57,20 @@ export class Api {
     return r.user;
   }
 
+  /** last known streak snapshot, for the home screen; null until /api/me has answered */
+  stats: P.MeResult | null = null;
+
   async me(): Promise<P.PublicUser | null> {
     if (!this.token) return null;
-    try { this.user = await this.call<P.PublicUser>('/api/me'); return this.user; }
-    catch { this.signOut(); return null; }
+    try {
+      const r = await this.call<P.MeResult>('/api/me');
+      this.stats = r; this.user = r.user;
+      return this.user;
+    } catch { this.signOut(); return null; }
   }
 
   signOut(): void {
-    this.token = null; this.user = null;
+    this.token = null; this.user = null; this.stats = null;
     try { globalThis.localStorage?.removeItem('clues.token'); } catch { /* ignore */ }
   }
 
@@ -76,6 +82,8 @@ export class Api {
   roomHeartbeat(roomId: string, focusCell: number | null) {
     return this.call<P.RoomHeartbeatResult>('/api/room/heartbeat', { roomId, focusCell });
   }
+  exportAccount() { return this.call<P.ExportResult>('/api/account/export', {}); }
+  deleteAccount(code: string) { return this.call<P.DeleteResult>('/api/account/delete', { code, confirm: 'DELETE' }); }
   today() { return this.call<P.TodayResult>('/api/today', undefined, 'GET'); }
   board(editionId: string) { return this.call<P.BoardResult>(`/api/board?editionId=${encodeURIComponent(editionId)}`, undefined, 'GET'); }
   week(weekId: string) { return this.call<P.WeekResult>(`/api/week?weekId=${encodeURIComponent(weekId)}`, undefined, 'GET'); }

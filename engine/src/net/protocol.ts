@@ -78,6 +78,9 @@ export interface RunResult {
   /** where this run placed on the edition board, 1-based; null if unranked */
   rank: number | null;
   streak: number;
+  /** the longest run this player has ever assembled, so a broken streak still shows
+   *  what it was worth */
+  bestStreak?: number;
   /** Rounded percentile band by adjusted time — 1, 5, 10, 25 or 50 — or null when the
    *  edition has too few finishers for the number to mean anything. */
   percentile?: number | null;
@@ -197,5 +200,24 @@ export interface TodayResult {
   serverNow: number;
   flags: PublicFlags;
 }
+
+export interface MeResult {
+  user: PublicUser;
+  streak: number;
+  bestStreak: number;
+  playedToday: boolean;
+  /** today is unplayed and a live streak is riding on it */
+  atRisk: boolean;
+  daysPlayed: number;
+}
+
+export interface ExportResult {
+  exportedAt: number;
+  account: { id: string; email: string; displayName: string; createdAt: number };
+  plays: Record<string, unknown>[];
+  results: Record<string, unknown>[];
+}
+
+export interface DeleteResult { deleted: true; removed: Record<string, number>; }
 
 export interface ApiErrorBody { error: string; detail?: string; }

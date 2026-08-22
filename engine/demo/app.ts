@@ -9,6 +9,7 @@ import {
   tileArt, ART_DEFS,
   Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
   termsForClue, TermId, dealFor, resultGrid, shareText,
+  streakStats, StreakStats,
 } from '../src/index.js';
 
 type Mode = 'daily' | 'weekly' | 'free' | 'split' | 'room' | 'archive';
@@ -300,7 +301,21 @@ class App {
 
   /* ---------------- chrome ---------------- */
 
+  /** The article exists three times in the page, once per language, and the language
+   *  picker chooses between them. Translating an essay by string table would have been a
+   *  worse essay in all three languages. */
+  paintArticle() {
+    for (const n of Array.from(document.querySelectorAll<HTMLElement>('.how-body'))) {
+      const mine = n.dataset.lang === this.prefs.locale;
+      n.hidden = !mine;
+    }
+    const foot = document.querySelector<HTMLElement>('.site-foot a[href="#how"]');
+    if (foot) foot.textContent = { en: 'How it was built', pt: 'Como foi construído', es: 'Cómo se construyó' }[this.prefs.locale];
+    document.documentElement.lang = this.prefs.locale;
+  }
+
   buildChrome() {
+    this.paintArticle();
     const gameSel = $('#game') as HTMLSelectElement;
     gameSel.innerHTML = '';
     const open = allThemes().filter((t) => this.themeAllowed(t.id));
@@ -341,11 +356,39 @@ class App {
     this.paintAccount();
   }
 
+  /** The local board stores edition ids, not days. Daily ids carry their date, which is
+   *  what makes an offline streak possible at all — free play and rooms have no date and
+   *  correctly count for nothing. */
+  localPlayedDates(): string[] {
+    return localBoard.all()
+      .filter((r) => r.playerId === LOCAL_ID && r.editionId.startsWith('d:'))
+      .map((r) => r.editionId.split(':')[1])
+      .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d));
+  }
+
+  streakNow(): StreakStats {
+    if (this.online && this.api.stats) {
+      const s = this.api.stats;
+      return { current: s.streak, best: s.bestStreak, playedToday: s.playedToday, atRisk: s.atRisk };
+    }
+    return streakStats(this.localPlayedDates(), isoDate(new Date()));
+  }
+
   paintAccount() {
     const wrap = $('#account');
     wrap.innerHTML = '';
     const dot = el('span', 'dot ' + (this.online ? 'up' : 'down'));
     wrap.appendChild(dot);
+    const st = this.streakNow();
+    if (st.current > 0) {
+      // Shown before you play, not only after — a streak you cannot see is not one you
+      // are protecting. Dimmed while today is still open, solid once today is banked.
+      const chip = el('span', 'streak-chip' + (st.atRisk ? ' at-risk' : ''), `${st.current}`);
+      chip.title = st.atRisk
+        ? `${st.current}-day streak — today is still unplayed`
+        : `${st.current}-day streak · best ${st.best}`;
+      wrap.appendChild(chip);
+    }
     if (this.online && this.api.user) {
       wrap.appendChild(el('span', 'who', this.api.user.displayName));
       const out = el('button', 'link', 'Sign out');
@@ -393,7 +436,10 @@ class App {
           await this.newBoard();
         }
       } catch (e) {
-        note.textContent = `Could not sign in (${(e as ApiError).code ?? 'no server'}). Start it with: npm run serve`;
+        const code = (e as ApiError).code;
+        note.textContent = code === 'too-many-requests'
+          ? 'Too many sign-in attempts. Try again in a few minutes.'
+          : `Could not sign in (${code ?? 'no server'}). Start it with: npm run serve`;
       }
     };
     cancel.onclick = () => ov.classList.remove('on');
@@ -790,12 +836,11 @@ class App {
     });
     await localBoard.submit(entryFrom(this.localRef, LOCAL_ID, 'You', this.prefs.locale,
       s.elapsedMs, s.hintsUsed, s.mistakes, res));
-    const dates: string[] = [];
-    for (let i = 0; i < 30; i++) dates.push(isoDate(new Date(Date.now() - i * 86400000)));
+    const st = streakStats(this.localPlayedDates(), isoDate(new Date()));
     this.showResult({
       editionId: this.edition.id, timeMs: s.elapsedMs, timeAddedMs: res.timeAddedMs, hintsUsed: s.hintsUsed,
       mistakes: s.mistakes, score: res.score, perfect: res.perfect,
-      ranked: false, rank: null, streak: await localBoard.streak(LOCAL_ID, dates),
+      ranked: false, rank: null, streak: st.current, bestStreak: st.best,
     });
   }
 
@@ -828,7 +873,8 @@ class App {
     if (r.rank) card.appendChild(el('p', 'perfect', `${this.ui.rank} ${r.rank}`));
     if (r.perfect) card.appendChild(el('p', 'perfect', this.ui.perfect));
     if (!r.ranked) card.appendChild(el('p', 'streak', this.online ? 'Practice run — not ranked' : 'Local run — sign in for ranked play'));
-    card.appendChild(el('p', 'streak', `${this.ui.streak} ${r.streak}`));
+    card.appendChild(el('p', 'streak',
+      `${this.ui.streak} ${r.streak}${r.bestStreak && r.bestStreak > r.streak ? ` · best ${r.bestStreak}` : ''}`));
 
     const text = shareText({
       ...marks, title: this.strings.title, edition,
@@ -1550,12 +1596,94 @@ class App {
     check('undimAtEnd', S.undimAtEnd);
 
     card.appendChild(rows);
+
+    // Your data. Signed in only — there is nothing on our side to export or erase until
+    // there is an account, and the local board is cleared by clearing site data.
+    if (this.online && this.api.user) {
+      card.appendChild(el('h3', 'setting-head', 'Your data'));
+      const note = el('p', 'streak', '');
+      const exp = el('button', '', 'Download my data');
+      exp.onclick = async () => {
+        try {
+          const dump = await this.api.exportAccount();
+          const url = URL.createObjectURL(new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' }));
+          const a = document.createElement('a');
+          a.href = url; a.download = `beyond-doubt-${dump.account.id}.json`; a.click();
+          setTimeout(() => URL.revokeObjectURL(url), 5000);
+          note.textContent = 'Downloaded.';
+        } catch (e) { note.textContent = `Could not export (${(e as ApiError).code ?? 'no server'}).`; }
+      };
+      const del = el('button', 'danger', 'Delete my account');
+      del.onclick = () => { ov.classList.remove('on'); this.deleteAccountFlow(); };
+      card.appendChild(exp);
+      card.appendChild(del);
+      card.appendChild(note);
+    }
+
+    const legal = el('p', 'streak legal-links');
+    for (const [label, id] of [['Privacy', '#privacy'], ['Terms', '#terms']] as const) {
+      const a = document.createElement('a');
+      a.href = id; a.textContent = label;
+      a.onclick = () => { ov.classList.remove('on'); };
+      legal.appendChild(a);
+    }
+    card.appendChild(legal);
+
     const done = el('button', 'primary', S.done);
     done.onclick = () => ov.classList.remove('on');
     const reset = el('button', '', S.reset);
     reset.onclick = () => { this.settings = { ...DEFAULT_SETTINGS }; this.commitSettings(); this.openSettings(); };
     card.appendChild(done);
     card.appendChild(reset);
+    ov.appendChild(card);
+    ov.classList.add('on');
+  }
+
+  /** Two gates, deliberately: a code that proves the address is still theirs, and a word
+   *  typed out in full. Neither is friction for someone who means it. */
+  deleteAccountFlow() {
+    const ov = $('#overlay');
+    ov.innerHTML = '';
+    const card = el('div', 'result signin');
+    card.appendChild(el('h2', '', 'Delete your account'));
+    card.appendChild(el('p', 'big',
+      'This erases your account, every run you have recorded and your place on every leaderboard. It cannot be undone.'));
+    const note = el('p', 'streak', 'We will email a code to confirm it is you.');
+    const code = document.createElement('input');
+    code.type = 'text'; code.placeholder = '6-digit code'; code.className = 'field'; code.style.display = 'none';
+    const word = document.createElement('input');
+    word.type = 'text'; word.placeholder = 'Type DELETE'; word.className = 'field'; word.style.display = 'none';
+    const go = el('button', 'danger', 'Send code');
+    const cancel = el('button', 'primary', 'Keep my account');
+    let stage: 'send' | 'confirm' = 'send';
+
+    go.onclick = async () => {
+      try {
+        if (stage === 'send') {
+          const r = await this.api.requestCode(this.api.user!.email);
+          stage = 'confirm';
+          code.style.display = ''; word.style.display = '';
+          go.textContent = 'Delete permanently';
+          note.textContent = r.devCode ? `Dev mode — your code is ${r.devCode}` : 'Check your email for the code.';
+          if (r.devCode) code.value = r.devCode;
+        } else {
+          if (word.value.trim().toUpperCase() !== 'DELETE') { note.textContent = 'Type DELETE to confirm.'; return; }
+          await this.api.deleteAccount(code.value.trim());
+          this.api.signOut();
+          this.online = false;
+          ov.classList.remove('on');
+          this.buildChrome();
+          await this.newBoard();
+          this.toast('Your account has been deleted.', 'good');
+        }
+      } catch (e) {
+        const c = (e as ApiError).code;
+        note.textContent = c === 'too-many-requests' ? 'Too many attempts. Try again in a few minutes.'
+          : c === 'bad-code' ? 'That code did not match.' : `Could not delete (${c ?? 'no server'}).`;
+      }
+    };
+    cancel.onclick = () => ov.classList.remove('on');
+    for (const n of [note, code, word, go, cancel]) card.appendChild(n);
     ov.appendChild(card);
     ov.classList.add('on');
   }

@@ -1,7 +1,9 @@
 import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameServer, bands } from '../src/net/server.js';
+import { GameServer, bands, isoLaunch } from '../src/net/server.js';
+import { isoDate, civilDate, GAME_TZ, shiftDays } from '../src/core/edition.js';
+import { streakStats } from '../src/core/streak.js';
 import { Session } from '../src/core/session.js';
 import { bits } from '../src/core/grid.js';
 import { State } from '../src/core/clue.js';
@@ -647,4 +649,189 @@ test('a finished run reports where it placed against everyone else', async () =>
   const st = await srv.store.standing(res.editionId, user.id);
   assert.equal(st.total, 1);
   assert.equal(st.ahead, 0, 'you are not ahead of yourself');
+});
+
+test('the launch date is a real choice, and a malformed one is refused loudly', async () => {
+  // Unset means "today": a fresh deploy must never claim boards from before it existed.
+  const clk = clock('2026-08-22T12:00:00Z');
+  const fresh = await makeServer({ now: clk.now });
+  const { token } = await signIn(fresh, 'launch@b.co');
+  const user = await userOf(fresh, token);
+  assert.equal((await fresh.archive(user, { themeId: 'gallery', days: 30 })).launch, '2026-08-22');
+  await assert.rejects(() => fresh.start(user, { mode: 'archive', themeId: 'gallery', date: '2026-08-21' }),
+    (e: any) => e.code === 'before-launch');
+
+  // Set earlier and the archive has depth, because every past board is a pure function of its date
+  const back = await makeServer({ now: clk.now, launchDate: '2026-08-01' });
+  const u2 = await userOf(back, (await signIn(back, 'back@b.co')).token);
+  assert.equal((await back.archive(u2, { themeId: 'gallery', days: 30 })).launch, '2026-08-01');
+  await back.start(u2, { mode: 'archive', themeId: 'gallery', date: '2026-08-05' });
+
+  // Every check against it is a string comparison, so an unpadded month would skew the
+  // archive silently. Refuse at construction instead.
+  for (const bad of ['2026-8-22', '22-08-2026', 'yesterday', '2026-13-01']) {
+    assert.throws(() => new GameServer({ launchDate: bad }), /launchDate must be YYYY-MM-DD|Invalid/,
+      `accepted ${bad}`);
+  }
+  assert.equal(isoLaunch(undefined), isoDate(new Date()));
+});
+
+test('the day rolls over at midnight Eastern, not at 8pm', async () => {
+  // 23:30 in Toronto on the 22nd is already the 23rd in UTC. Under the old UTC calendar
+  // this player was handed tomorrow's board four and a half hours early.
+  const late = clock('2026-08-23T03:30:00Z');
+  const srv = await makeServer({ now: late.now, minMoveIntervalMs: 0 });
+  assert.equal(civilDate(new Date(late.now()), GAME_TZ), '2026-08-22');
+  const t = await srv.today();
+  assert.ok(t.editions.every((e) => e.date === '2026-08-22'), 'still the 22nd for a player in Toronto');
+
+  // half an hour later it is genuinely the 23rd there, and the board turns over
+  late.advance(60 * 60_000);
+  assert.equal(civilDate(new Date(late.now()), GAME_TZ), '2026-08-23');
+  assert.ok((await srv.today()).editions.every((e) => e.date === '2026-08-23'));
+
+  // and the archive's idea of "no future boards" moves with it
+  const { token } = await signIn(srv, 'tz@b.co');
+  const user = await userOf(srv, token);
+  await assert.rejects(() => srv.start(user, { mode: 'archive', themeId: 'gallery', date: '2026-08-24' }),
+    (e: any) => e.code === 'future-edition');
+  await srv.start(user, { mode: 'archive', themeId: 'gallery', date: '2026-08-22' });
+});
+
+test('winter and summer both land on midnight local, so DST is not a cliff', async () => {
+  // Toronto is UTC-4 in August and UTC-5 in January; a fixed offset would break one of them.
+  assert.equal(civilDate(new Date('2026-08-23T03:59:00Z'), GAME_TZ), '2026-08-22');
+  assert.equal(civilDate(new Date('2026-08-23T04:01:00Z'), GAME_TZ), '2026-08-23');
+  assert.equal(civilDate(new Date('2026-01-23T04:59:00Z'), GAME_TZ), '2026-01-22');
+  assert.equal(civilDate(new Date('2026-01-23T05:01:00Z'), GAME_TZ), '2026-01-23');
+});
+
+test('sign-in is rate limited per IP and per address, and the window expires', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const from = (ip: string) => ({ headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` }, socket: {} }) as any;
+
+  // one address, hammered: the per-email cap bites first
+  for (let i = 0; i < 5; i++) await srv.authRequest({ email: 'a@b.co' }, from('1.2.3.4'));
+  await assert.rejects(srv.authRequest({ email: 'a@b.co' }, from('1.2.3.4')), /too-many-requests/);
+  // a different address from the same IP still goes through — the caps are independent
+  await srv.authRequest({ email: 'c@d.co' }, from('1.2.3.4'));
+  // and a different IP is unaffected, so one abuser cannot lock out the internet
+  await srv.authRequest({ email: 'e@f.co' }, from('9.9.9.9'));
+
+  // walk the IP up to its own ceiling with fresh addresses each time
+  for (let i = 0; i < 12; i++) {
+    const p = srv.authRequest({ email: `u${i}@b.co` }, from('5.5.5.5'));
+    if (i < 12) await p.catch(() => {});
+  }
+  await assert.rejects(srv.authRequest({ email: 'zz@b.co' }, from('5.5.5.5')), /too-many-requests/);
+
+  // the window is a window, not a ban
+  clk.advance(16 * 60_000);
+  const ok = await srv.authRequest({ email: 'a@b.co' }, from('1.2.3.4'));
+  assert.ok(ok.devCode, 'the limit lifts once the window has passed');
+});
+
+test('code guessing is capped too, so six digits are not brute forceable', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const from = { headers: { 'x-forwarded-for': '7.7.7.7' }, socket: {} } as any;
+  await srv.authRequest({ email: 'a@b.co' }, from);
+  let refusals = 0;
+  for (let i = 0; i < 40; i++) {
+    try { await srv.authVerify({ email: 'a@b.co', code: String(100000 + i) }, from); }
+    catch (e) { if (/too-many-requests/.test(String(e))) refusals++; }
+  }
+  assert.ok(refusals > 0, 'the guesser is stopped well short of forty tries');
+});
+
+test('streaks: consecutive days count, a gap resets, and the best run is remembered', () => {
+  const s = streakStats(['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-22'], '2026-08-22');
+  assert.equal(s.current, 1, 'today stands alone after the gap');
+  assert.equal(s.best, 3, 'the earlier three-day run is still the best');
+  assert.ok(s.playedToday);
+  assert.equal(s.atRisk, false);
+});
+
+test("a streak survives until midnight: today unplayed does not break yesterday's run", () => {
+  const s = streakStats(['2026-08-20', '2026-08-21'], '2026-08-22');
+  assert.equal(s.current, 2, 'still on two — today has not been lost yet');
+  assert.equal(s.atRisk, true, 'but it is riding on today');
+  assert.equal(s.playedToday, false);
+  // and once the day after that passes unplayed, it is gone
+  assert.equal(streakStats(['2026-08-20', '2026-08-21'], '2026-08-23').current, 0);
+});
+
+test('a streak crossing the DST change counts every day exactly once', () => {
+  // clocks fall back in the small hours of 2026-11-01 in Toronto
+  const days = ['2026-10-30', '2026-10-31', '2026-11-01', '2026-11-02'];
+  const s = streakStats(days, '2026-11-02');
+  assert.equal(s.current, 4, 'no day is duplicated or skipped by the extra hour');
+  assert.equal(streakStats(['2026-03-07', '2026-03-08', '2026-03-09'], '2026-03-09').current, 3,
+    'and the same in spring, when an hour goes missing');
+});
+
+test('finishing the daily builds a real streak, and an archive board played late does not', async () => {
+  const clk = clock('2026-08-20T16:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-08-01' });
+  const { token } = await signIn(srv, 'streaky@b.co');
+  const user = await userOf(srv, token);
+
+  const playDaily = async () => {
+    const start = await srv.start(user, { mode: 'daily', themeId: 'orchard' });
+    const { last } = await playHonestly(srv, token, start.playId, start.view, 1000, clk);
+    return last.result;
+  };
+
+  const d1 = await playDaily();
+  assert.equal(d1.streak, 1);
+  clk.set('2026-08-21T16:00:00Z');
+  const d2 = await playDaily();
+  assert.equal(d2.streak, 2, 'a second day in a row');
+  assert.equal(d2.bestStreak, 2);
+
+  // skip the 22nd entirely, then come back on the 23rd
+  clk.set('2026-08-23T16:00:00Z');
+  const d4 = await playDaily();
+  assert.equal(d4.streak, 1, 'the gap broke it');
+  assert.equal(d4.bestStreak, 2, 'but the best run is remembered');
+
+  // an archive board from a week ago is a fine game and not a day on the streak
+  const back = await srv.start(user, { mode: 'archive', themeId: 'orchard', date: '2026-08-16' });
+  await playHonestly(srv, token, back.playId, back.view, 1000, clk);
+
+  const me = await srv.me(user);
+  assert.equal(me.streak, 1, 'backfilling the archive cannot manufacture a streak');
+  assert.equal(me.bestStreak, 2);
+  assert.equal(me.daysPlayed, 3, 'the late run is not counted as a day played');
+  assert.equal(me.playedToday, true);
+});
+
+test('a player can take a copy of everything and then erase themselves', async () => {
+  const clk = clock('2026-08-20T16:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'leaving@b.co', 'Leaving');
+  const user = await userOf(srv, token);
+  const start = await srv.start(user, { mode: 'daily', themeId: 'orchard' });
+  await playHonestly(srv, token, start.playId, start.view, 1000, clk);
+
+  const dump = await srv.accountExport(user);
+  assert.equal(dump.account.email, 'leaving@b.co');
+  assert.equal(dump.results.length, 1, 'the run they just finished is in the copy');
+  assert.equal(dump.plays.length, 1);
+  assert.ok(!JSON.stringify(dump).includes('code_hash'), 'no secrets ride along in the export');
+
+  // a live session alone is not enough
+  await assert.rejects(srv.accountDelete(user, { confirm: 'DELETE', code: '000000' }), /bad-code/);
+  await assert.rejects(srv.accountDelete(user, { confirm: 'yes' }), /confirm-required/);
+
+  const again = await srv.authRequest({ email: 'leaving@b.co' });
+  const gone = await srv.accountDelete(user, { confirm: 'DELETE', code: again.devCode! });
+  assert.equal(gone.deleted, true);
+  assert.equal(gone.removed.results, 1);
+
+  assert.equal(await srv.store.userByEmail('leaving@b.co'), undefined, 'the account is gone');
+  assert.equal(await srv.store.userForToken(token, clk.now()), undefined, 'and so is the session');
+  const board = await srv.board(start.edition.id, null);
+  assert.equal(board.entries.length, 0, 'and they are off the leaderboard');
 });

@@ -288,6 +288,63 @@ states never rely on hue alone. Settings are sanitised on load, so a stale or ha
 record cannot produce an unreadable board.
 
 
+## Accounts: the copy and the exit
+
+Two endpoints, both behind a live session:
+
+    POST /api/account/export   -> every row held about the caller, as JSON
+    POST /api/account/delete   -> { code, confirm: 'DELETE' }
+
+Deleting takes more than a session on purpose. A live token proves the browser, not the
+person; the delete additionally requires a code mailed to the address *now*, so a borrowed
+phone cannot erase someone's five-year streak. The delete is real — results, plays, room
+memberships, tokens and outstanding codes all go, and the leaderboards lose those rows with
+them. A scoreboard that still lists someone who asked to be forgotten has not forgotten them.
+
+The export deliberately returns rows rather than a summary; a summary is us deciding what
+someone gets to see about themselves. It carries no hashes and no session tokens.
+
+## Streaks
+
+`Store.playedDates(userId)` returns the days a player finished on time; `streakStats()` in
+`src/core/streak.ts` turns that into `{ current, best, playedToday, atRisk }`. The rule is
+deliberately a pure function over dates rather than a SQL window, because it is a product
+decision that will change and a decision that will change should be readable.
+
+Two details that are easy to get wrong and hard to notice:
+
+- **Civil-day arithmetic, not `- 86_400_000`.** Subtracting a day in milliseconds lands in
+  the same civil day twice on the two days a year the clocks move, which invents a day the
+  player never played. `shiftDays()` anchors at noon UTC and steps in UTC instead.
+- **Today unplayed does not break the streak.** It counts back from yesterday and reports
+  `atRisk`, so the number people carry around survives until midnight.
+
+## Sign-in rate limits
+
+`Store.hitRateLimit(key, windowMs, now)` records an attempt and returns how many happened
+in the window. The server keys on both the IP and the address, because each alone is
+trivially varied. It is deliberately approximate — two racing requests can both squeak
+through, which for a speed bump on a sign-in form is a fair trade against locking a table on
+every hit.
+
+## End-to-end checks
+
+`npm run e2e` builds, starts a real server on a temp database and drives Chromium through
+the things unit tests cannot see: that a square opens a sheet, that an undecidable square is
+refused with an explanation that does not leak the answer, that the newest clue arrives at
+the top, that a board can be finished, that the article follows the language picker, and
+that sign-in throttles. Every check is an assertion, not a screenshot — a screenshot tells
+you something changed; an assertion tells you what was supposed to be true and no longer is.
+
+Playwright is deliberately **not** in `package.json`: its install hook downloads a browser,
+and the deploy build has no business doing that. Install it where you run the checks —
+
+    npm i --no-save playwright && npx playwright install chromium
+
+— and `npm run e2e` picks it up. Without it the script says so and exits rather than
+failing obscurely. `npm run verify` runs tests, fuzz and e2e.
+
+
 ## Deploying
 
 The demo is a single static HTML file, so the front end deploys anywhere. The decision is

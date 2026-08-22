@@ -7,6 +7,7 @@ export * from './core/session.js';
 export * from './core/scoring.js';
 export * from './core/share.js';
 export * from './core/edition.js';
+export * from './core/streak.js';
 export * from './core/leaderboard.js';
 export * from './i18n/index.js';
 export * from './i18n/locales.js';

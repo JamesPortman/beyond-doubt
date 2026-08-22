@@ -62,7 +62,9 @@ export interface Store {
   /** How this user's run compares with everyone else who finished the same edition:
    *  [their position by adjusted time, total finishers, how many were perfect]. */
   standing(editionId: string, userId: string): Promise<{ ahead: number; total: number; perfect: number }>;
-  streak(userId: string, isoDates: string[]): Promise<number>;
+  /** Every civil day this user finished on time, in ascending order. The streak rule
+   *  itself lives in core/streak.ts — the store only says which days happened. */
+  playedDates(userId: string): Promise<string[]>;
   resultsByEdition(userId: string, editionIds: string[]): Promise<Map<string, ResultRow>>;
   createRoom(r: RoomRow): Promise<void>;
   roomByCode(code: string): Promise<RoomRow | undefined>;
@@ -70,6 +72,13 @@ export interface Store {
   joinRoom(roomId: string, userId: string, playId: string, now: number): Promise<void>;
   touchMember(roomId: string, userId: string, focusCell: number | null, now: number): Promise<void>;
   roomPresence(roomId: string): Promise<RoomMemberRow[]>;
+  /** Count recent attempts against a key and record this one. Returns how many have
+   *  happened inside the window, including this attempt — so > limit means refuse. */
+  hitRateLimit(key: string, windowMs: number, now: number): Promise<number>;
+  /** Everything held about one person, for the copy they are entitled to ask for. */
+  exportUser(userId: string): Promise<{ user: UserRow; plays: PlayRow[]; results: ResultRow[] }>;
+  /** Erase a person. Returns the row counts removed, so the caller can tell them what went. */
+  deleteUser(userId: string): Promise<Record<string, number>>;
   /** operator settings, JSON-encoded. One row per key. */
   getSetting(key: string): Promise<string | undefined>;
   putSetting(key: string, value: string, now: number): Promise<void>;
@@ -128,6 +137,9 @@ export class SqliteStore implements Store {
       CREATE INDEX IF NOT EXISTS room_members_room ON room_members(room_id);
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS rate_hits (
+        key TEXT NOT NULL, at INTEGER NOT NULL);
+      CREATE INDEX IF NOT EXISTS rate_hits_key ON rate_hits(key, at);
     `);
   }
 
@@ -143,6 +155,17 @@ export class SqliteStore implements Store {
          FROM results WHERE edition_id = ?`,
     ).get(mine?.time_ms ?? Number.MAX_SAFE_INTEGER, editionId) as { total: number; perfect: number; ahead: number };
     return { ahead: Number(row?.ahead ?? 0), total: Number(row?.total ?? 0), perfect: Number(row?.perfect ?? 0) };
+  }
+
+  /** Deliberately approximate. Two requests racing can both squeak through, which for a
+   *  speed bump on a sign-in form is a fair trade against locking a table on every hit. */
+  async hitRateLimit(key: string, windowMs: number, now: number): Promise<number> {
+    const from = now - windowMs;
+    this.db.prepare('DELETE FROM rate_hits WHERE at < ?').run(from);
+    this.db.prepare('INSERT INTO rate_hits (key, at) VALUES (?, ?)').run(key, now);
+    const r = this.db.prepare('SELECT COUNT(*) AS n FROM rate_hits WHERE key = ? AND at >= ?')
+      .get(key, from) as { n: number };
+    return Number(r?.n ?? 0);
   }
 
   /* ---------- operator settings ---------- */
@@ -280,13 +303,41 @@ export class SqliteStore implements Store {
     return i === -1 ? null : i + 1;
   }
 
-  /** Consecutive daily editions completed, counting back from the given dates. */
-  async streak(userId: string, isoDates: string[]): Promise<number> {
-    const rows = this.db.prepare('SELECT DISTINCT iso_date FROM results WHERE user_id = ? AND iso_date IS NOT NULL AND late = 0')
+  /** `late = 0` is the whole defence against streak farming: an archive board played
+   *  three weeks after its day is a perfectly good game and not a day on the streak. */
+  async playedDates(userId: string): Promise<string[]> {
+    const rows = this.db.prepare(
+      `SELECT DISTINCT iso_date FROM results
+        WHERE user_id = ? AND iso_date IS NOT NULL AND late = 0 ORDER BY iso_date`)
       .all(userId) as { iso_date: string }[];
-    const done = new Set(rows.map((r) => r.iso_date));
-    let n = 0;
-    for (const d of isoDates) { if (!done.has(d)) break; n++; }
+    return rows.map((r) => r.iso_date);
+  }
+
+  /* ---------- the right to a copy, and the right to leave ---------- */
+
+  async exportUser(userId: string): Promise<{ user: UserRow; plays: PlayRow[]; results: ResultRow[] }> {
+    const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(userId) as unknown as UserRow;
+    return {
+      user,
+      plays: this.db.prepare('SELECT * FROM plays WHERE user_id = ? ORDER BY started_at').all(userId) as unknown as PlayRow[],
+      results: this.db.prepare('SELECT * FROM results WHERE user_id = ? ORDER BY submitted_at').all(userId) as unknown as ResultRow[],
+    };
+  }
+
+  /** A real delete, not a flag. The leaderboard loses their rows too — a scoreboard that
+   *  still lists someone who asked to be forgotten has not forgotten them. */
+  async deleteUser(userId: string): Promise<Record<string, number>> {
+    const user = this.db.prepare('SELECT email FROM users WHERE id = ?').get(userId) as unknown as { email: string } | undefined;
+    const n: Record<string, number> = {};
+    const run = (label: string, sql: string, arg: string) => {
+      n[label] = Number(this.db.prepare(sql).run(arg).changes ?? 0);
+    };
+    run('results', 'DELETE FROM results WHERE user_id = ?', userId);
+    run('plays', 'DELETE FROM plays WHERE user_id = ?', userId);
+    run('rooms', 'DELETE FROM room_members WHERE user_id = ?', userId);
+    run('tokens', 'DELETE FROM tokens WHERE user_id = ?', userId);
+    if (user) run('codes', 'DELETE FROM auth_codes WHERE email = ?', user.email);
+    run('user', 'DELETE FROM users WHERE id = ?', userId);
     return n;
   }
 

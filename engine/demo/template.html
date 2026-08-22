@@ -67,6 +67,14 @@
   #account .dot{width:7px;height:7px;border-radius:50%;background:var(--ink-soft)}
   #account .dot.up{background:var(--state-a);box-shadow:0 0 6px var(--state-a)}
   #account .who{color:var(--ink)}
+  /* A streak reads as a count you are keeping, not a badge you were awarded — so it is a
+     quiet numeral in the chrome, and only goes dim-outlined when today is still unplayed. */
+  #account .streak-chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;
+    border-radius:999px;font-size:.78rem;font-variant-numeric:tabular-nums;letter-spacing:.02em;
+    background:var(--state-a);color:var(--bg);font-weight:600}
+  #account .streak-chip::before{content:'\25B4';font-size:.7rem;opacity:.8}
+  #account .streak-chip.at-risk{background:transparent;color:var(--ink-soft);
+    box-shadow:inset 0 0 0 1px var(--ink-soft)}
   .link{border:0;padding:0 0 0 4px;color:var(--accent);text-decoration:underline;background:none;font-size:.86rem}
   .day.locked{opacity:.3;cursor:not-allowed}
   .field{display:block;width:100%;margin:0 0 8px;padding:9px 11px;border-radius:4px;
@@ -331,6 +339,18 @@
   .how .pull{background:var(--surface-alt);border:1px solid var(--line);
     border-left:3px solid var(--accent);border-radius:0 6px 6px 0;padding:17px 21px;margin:25px 0}
   .how .pull p:last-child{margin-bottom:0}
+  /* The legal pages borrow the article's typography but drop its scale — nobody wants a
+     privacy policy that opens like a cover story. */
+  .how.legal h2{font-size:clamp(1.35rem,4vw,1.8rem)}
+  .how.legal .standfirst{font-size:1rem;margin-bottom:26px}
+  .how.legal h3{margin-top:34px;font-size:clamp(1rem,2.6vw,1.15rem)}
+  .how.legal p{font-size:.95rem}
+  .how.legal a{color:var(--accent)}
+  .legal-links{display:flex;gap:14px;justify-content:center;margin-top:14px}
+  .legal-links a{color:var(--ink-soft);text-decoration:underline}
+  .result button.danger{border-color:var(--state-b);color:var(--state-b)}
+  .setting-head{font-family:var(--font-display);font-size:.78rem;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-soft);margin:22px 0 8px;text-align:left}
   .how .pull .lab{font-family:var(--font-display);font-size:.68rem;letter-spacing:.15em;
     text-transform:uppercase;color:var(--accent);font-weight:700;display:block;margin-bottom:7px}
   .how .figures{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;
@@ -348,7 +368,7 @@
     font-size:.9rem;color:var(--ink-soft)}
 
   .site-foot{max-width:1180px;margin:28px auto 40px;padding:0 18px;text-align:center;
-    font-size:.86rem}
+    font-size:.86rem;display:flex;gap:18px;justify-content:center;flex-wrap:wrap}
   .site-foot a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--line);
     padding-bottom:2px}
   .site-foot a:hover{color:var(--accent);border-bottom-color:var(--accent)}
@@ -496,6 +516,7 @@
   </div>
 
   <section class="how" id="how">
+  <div class="how-body" data-lang="en">
     <p class="eyebrow">Beyond Doubt</p>
     <h2>How it was built</h2>
     <p class="standfirst">A daily deduction puzzle with one rule: you are never asked to guess.
@@ -615,9 +636,363 @@
 
     <p class="colophon">Built in TypeScript with no runtime dependencies in the engine.
     Deployed on Vercel with Postgres. Artwork by James Portman.</p>
+  </div>
+  <div class="how-body" data-lang="pt" hidden>
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>Como foi construído</h2>
+    <p class="standfirst">Um quebra-cabeça diário de dedução com uma única regra: nunca se
+    pede que você adivinhe. É uma frase fácil de imprimir na caixa e cara de cumprir.</p>
+
+    <p>Quase todo quebra-cabeça que se diz lógico acaba, mais cedo ou mais tarde, entregando
+    um cara ou coroa e torcendo para você não perceber. Este não consegue. Toda casa que você
+    tem permissão de virar já foi decidida pelas pistas que estão diante de você — e, se não
+    foi, o tabuleiro recusa a jogada e explica por quê. Tudo o que vem abaixo é o preço dessa
+    promessa.</p>
+
+    <h3>Um tabuleiro é um número</h3>
+    <p class="sub">Vinte casas, um inteiro</p>
+    <p>Um tabuleiro tem no máximo vinte casas, e cada casa está em um de dois estados. Essa
+    imagem inteira cabe num único inteiro de 32 bits — um bit por casa. Cada pista se compila
+    em duas ou três operações de bits sobre esse número, o que permite ao motor perguntar
+    "isto continua verdadeiro?" milhões de vezes sem que ninguém perceba.</p>
+    <p>Isso importa por causa de como a promessa é mantida. Quando você toca numa casa, o
+    motor percorre <em>todos os arranjos do tabuleiro compatíveis com as pistas que você tem
+    neste momento</em>. Se todos concordam que esta casa está vendida, ela está vendida. Se um
+    único discorda, nada a força ainda, e a jogada é recusada. Não existe tabela de respostas
+    sendo consultada — a recusa é uma prova, calculada com o seu dedo ainda no vidro.</p>
+
+    <div class="minigrid" aria-hidden="true">
+      <i class="a"></i><i class="b"></i><i></i><i class="a"></i>
+      <i></i><i class="a"></i><i class="b"></i><i></i>
+      <i class="b"></i><i></i><i class="a"></i><i class="a"></i>
+    </div>
+
+    <h3>Nada no tabuleiro é mentira</h3>
+    <p class="sub">Geração</p>
+    <p>Os tabuleiros são gerados de trás para frente. A solução é sorteada primeiro, e a
+    partir daí o gerador só considera pistas que sejam <b>verdadeiras para aquela
+    solução</b> — de modo que nenhuma pista pode, sem querer, eliminar a resposta. Desse
+    conjunto ele monta uma corrente: um fato inicial, depois uma pista que destrava uma casa,
+    depois a pista que aquela casa guardava, e assim por diante até o tabuleiro inteiro estar
+    forçado.</p>
+    <p>Se a corrente não fecha, o tabuleiro é descartado e outro é sorteado. Nada é publicado
+    sem ter sido resolvido antes pela máquina — é por isso que "existe sempre uma próxima
+    jogada" é uma garantia, e não uma esperança.</p>
+    <p>Todo tabuleiro é também uma função pura da sua semente. Duas pessoas que abrem o
+    quebra-cabeça do mesmo dia em lados opostos do mundo recebem o tabuleiro idêntico, gerado
+    de forma independente em cada aparelho, sem nada trafegando entre elas.</p>
+
+    <h3>O seu navegador nunca recebe a resposta</h3>
+    <p class="sub">Jogo verificado no servidor</p>
+    <p>O jogo classificado tem uma exigência incômoda: o servidor precisa verificar cada
+    jogada, mas o jogo precisa parecer instantâneo. Mandar a solução para o navegador
+    resolveria o segundo problema e destruiria o primeiro.</p>
+    <div class="pull">
+      <span class="lab">O truque</span>
+      <p>O conjunto forçado <em>é</em> a resposta. Se todos os arranjos compatíveis com as suas
+      pistas concordam sobre uma casa, essa concordância é a verdade sobre ela — então um
+      navegador que só tem as pistas joga um tabuleiro inteiro corretamente sem jamais receber
+      uma única resposta.</p>
+    </div>
+    <p>Assim o cliente deduz localmente e responde na hora, e o servidor rederiva a mesma coisa
+    por conta própria e registra. O relógio pertence ao servidor. A decisão sobre que dia é
+    hoje também — e é por isso que um tempo rápido não pode ser reivindicado por um jogador
+    lento com as ferramentas de desenvolvedor abertas.</p>
+
+    <h3>Um motor, sete cenários</h3>
+    <p class="sub">Temas</p>
+    <p>Nada no motor sabe o que são quadros, convidados ou pomares. Um tema é um arquivo de
+    dados — dois nomes de estado, um punhado de substantivos, uma paleta, uma função de
+    desenho — e registrá-lo já traz de graça o gerador, o solucionador, as dicas, a pontuação,
+    o arquivo, a edição semanal, o placar, a acessibilidade e os três idiomas.</p>
+    <p>Foi essa restrição que tornou barato ser estranho. Um leilão, um jantar em que alguém é
+    culpado, um pomar doente, um filme cortado na ilha de edição, um quadro de avisos de
+    bastidores, uma folha de serviço, uma placa de céu do século XIX — sempre o mesmo
+    quebra-cabeça por baixo.</p>
+
+    <h3>Três idiomas, e nenhuma frase traduzida entre eles</h3>
+    <p class="sub">English · Português · Español</p>
+    <p>As pistas nunca são guardadas como texto. São estruturas — <em>contar, esta coluna,
+    este estado, exatamente duas</em> — e a frase é composta no instante em que você a lê, no
+    seu idioma, concordando com o substantivo que o tema usa.</p>
+    <p>Esta é a parte que não dá para fingir com substituição de texto. Árvore é feminino em
+    português e masculino em espanhol; um convidado pode ser um ou outro, dependendo de quem
+    seja. Então o jogo carrega a gramática em vez das frases, e a concordância é calculada:
+    <em>Nadia é culpada</em>, <em>Owen é culpado</em>. Errar isso é invisível para quem lê um
+    idioma só e irritante para todo o resto.</p>
+
+    <h3>Os quadros são reais</h3>
+    <p class="sub">Noite de Leilão</p>
+    <p>Vinte e uma das obras da Noite de Leilão são pinturas e fotografias da Baía Georgiana e
+    das Blue Mountains, de James Portman. Não são enfeite pregado no fim — o tema foi
+    reconstruído em torno delas. Uma galeria marca uma obra vendida com um pequeno ponto
+    vermelho ao lado da etiqueta, e é isso que uma casa decidida ganha: uma marca que deixa a
+    imagem em paz, em vez de um X riscado por cima dela.</p>
+
+    <h3>O que acessibilidade quis dizer aqui</h3>
+    <p class="sub">Derivada, não declarada</p>
+    <p>Modo escuro, modo claro, alto contraste e uma paleta segura para daltonismo são todos
+    <em>derivados</em> das cores do próprio tema, em vez de desenhados à mão tema a tema — de
+    modo que um tema novo não pode nascer com uma variante quebrada. As razões de contraste
+    são verificadas na bateria de testes em toda combinação de tema e modo.</p>
+    <p>Duas falhas reais foram pegas assim e corrigidas na origem: um tema deixava o texto
+    secundário em 2,84:1 sobre um fundo de cortiça, e o alto contraste não ajudava porque só
+    escurecia a tinta e não mexia no fundo.</p>
+
+    <h3>Como isso é verificado</h3>
+    <p class="sub">Testes</p>
+    <div class="figures">
+      <div class="fig"><b>79</b><span>testes, em SQLite</span></div>
+      <div class="fig"><b>15</b><span>ponta a ponta, no navegador</span></div>
+      <div class="fig"><b>294</b><span>tabuleiros por rodada de fuzz</span></div>
+      <div class="fig"><b>99ms</b><span>pior caso: gerar e resolver</span></div>
+    </div>
+    <p>A rodada de fuzz gera centenas de tabuleiros em todas as dificuldades e temas, resolve
+    cada um sem adivinhar e renderiza cada pista nos três idiomas, procurando qualquer coisa
+    que leia mal ou não possa ser terminada. A bateria inteira roda duas vezes — uma contra
+    SQLite e outra contra um Postgres de verdade — porque os dois discordam de maneiras
+    pequenas e caras. Uma consulta passava tranquila no SQLite e falhava no Postgres porque
+    uma coluna que é booleana num é inteira no outro; nove testes ficaram vermelhos no
+    instante em que encontraram o banco real.</p>
+    <p>Alguns dos melhores defeitos foram encontrados pelos testes, e não pelos jogadores: uma
+    escada de dicas que nunca subia, de modo que dois toques devolviam a mesma pista e todo o
+    orçamento de dicas podia ser gasto num único fato; e um painel de pistas que reconstruía o
+    tabuleiro ao passar o mouse — inofensivo até as pistas irem para dentro das cartas e
+    começarem a destruir justamente o elemento sob o ponteiro.</p>
+
+    <p class="colophon">Feito em TypeScript, com o motor sem nenhuma dependência de execução.
+    Publicado na Vercel com Postgres. Obras de James Portman.</p>
+  </div>
+  <div class="how-body" data-lang="es" hidden>
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>Cómo se construyó</h2>
+    <p class="standfirst">Un rompecabezas diario de deducción con una sola regla: nunca se te
+    pide adivinar. Es una frase fácil de imprimir en la caja y cara de cumplir.</p>
+
+    <p>Casi todos los rompecabezas que se llaman lógicos terminan, tarde o temprano,
+    entregándote un cara o cruz y esperando que no te des cuenta. Este no puede. Cada casilla
+    que se te permite voltear ya ha sido decidida por las pistas que tienes delante, y si no
+    lo ha sido, el tablero rechaza la jugada y te explica por qué. Todo lo que sigue es lo que
+    cuesta esa promesa.</p>
+
+    <h3>Un tablero es un número</h3>
+    <p class="sub">Veinte casillas, un entero</p>
+    <p>Un tablero tiene como mucho veinte casillas, y cada casilla está en uno de dos estados.
+    Esa imagen completa cabe en un solo entero de 32 bits — un bit por casilla. Cada pista se
+    compila en dos o tres operaciones de bits sobre ese número, lo que permite al motor
+    preguntar "¿esto sigue siendo cierto?" millones de veces sin que nadie lo note.</p>
+    <p>Eso importa por cómo se mantiene la promesa. Cuando tocas una casilla, el motor recorre
+    <em>todas las disposiciones del tablero compatibles con las pistas que tienes en este
+    momento</em>. Si todas coinciden en que esta casilla está vendida, está vendida. Si una
+    sola discrepa, todavía nada la obliga, y la jugada se rechaza. No hay ninguna tabla de
+    respuestas que se consulte: el rechazo es una demostración, calculada con tu dedo aún
+    sobre el cristal.</p>
+
+    <div class="minigrid" aria-hidden="true">
+      <i class="a"></i><i class="b"></i><i></i><i class="a"></i>
+      <i></i><i class="a"></i><i class="b"></i><i></i>
+      <i class="b"></i><i></i><i class="a"></i><i class="a"></i>
+    </div>
+
+    <h3>Nada en el tablero es mentira</h3>
+    <p class="sub">Generación</p>
+    <p>Los tableros se generan al revés. Primero se sortea la solución, y a partir de ahí el
+    generador solo considera pistas que sean <b>verdaderas para esa solución</b>, de modo que
+    ninguna pista puede eliminar la respuesta sin querer. De ese conjunto arma una cadena: un
+    hecho inicial, luego una pista que desbloquea una casilla, luego la pista que esa casilla
+    guardaba, y así hasta que el tablero entero queda forzado.</p>
+    <p>Si la cadena no se cierra, el tablero se descarta y se sortea otro. No se publica nada
+    que la máquina no haya resuelto antes, y por eso "siempre hay una jugada siguiente" es una
+    garantía y no una esperanza.</p>
+    <p>Cada tablero es además una función pura de su semilla. Dos personas que abren el
+    rompecabezas del mismo día en lados opuestos del mundo reciben el tablero idéntico,
+    generado de forma independiente en cada dispositivo, sin que nada viaje entre ellas.</p>
+
+    <h3>Tu navegador nunca recibe la respuesta</h3>
+    <p class="sub">Juego verificado en el servidor</p>
+    <p>El juego clasificado tiene una exigencia incómoda: el servidor tiene que verificar cada
+    jugada, pero el juego tiene que sentirse instantáneo. Mandar la solución al navegador
+    resolvería el segundo problema y destruiría el primero.</p>
+    <div class="pull">
+      <span class="lab">El truco</span>
+      <p>El conjunto forzado <em>es</em> la respuesta. Si todas las disposiciones compatibles
+      con tus pistas coinciden en una casilla, esa coincidencia es la verdad sobre ella: un
+      navegador que solo tiene las pistas puede jugar un tablero entero correctamente sin que
+      jamás se le diga una sola respuesta.</p>
+    </div>
+    <p>Así que el cliente deduce localmente y responde de inmediato, y el servidor vuelve a
+    derivar lo mismo por su cuenta y lo registra. El reloj es del servidor. La decisión sobre
+    qué día es hoy, también — y por eso un tiempo rápido no lo puede reclamar un jugador lento
+    con las herramientas de desarrollo abiertas.</p>
+
+    <h3>Un motor, siete escenarios</h3>
+    <p class="sub">Temas</p>
+    <p>Nada en el motor sabe qué son los cuadros, los invitados o los huertos. Un tema es un
+    archivo de datos — dos nombres de estado, un puñado de sustantivos, una paleta, una función
+    de dibujo — y registrarlo trae gratis el generador, el solucionador, las pistas, la
+    puntuación, el archivo, la edición semanal, la clasificación, la accesibilidad y los tres
+    idiomas.</p>
+    <p>Esa restricción es lo que hizo barato ser raro. Una subasta, una cena en la que alguien
+    es culpable, un huerto enfermo, una película cortada en el montaje, un tablón de anuncios
+    de camerinos, una hoja de servicios, una placa de cielo del siglo XIX: siempre el mismo
+    rompecabezas por debajo.</p>
+
+    <h3>Tres idiomas, y ni una frase traducida entre ellos</h3>
+    <p class="sub">English · Português · Español</p>
+    <p>Las pistas nunca se guardan como texto. Son estructuras — <em>contar, esta columna,
+    este estado, exactamente dos</em> — y la frase se compone en el instante en que la lees,
+    en tu idioma, concordando con el sustantivo que use el tema.</p>
+    <p>Esta es la parte que no se puede fingir con reemplazo de cadenas. Árbol es femenino en
+    portugués y masculino en español; un invitado puede ser lo uno o lo otro, según quién sea.
+    Así que el juego lleva la gramática en vez de las frases, y la concordancia se calcula:
+    <em>Nadia es culpable</em>, <em>Owen es culpable</em>, pero <em>Nadia está vendida</em> y
+    <em>Owen está vendido</em>. Equivocarse en esto es invisible para quien lee un solo idioma
+    e irritante para todos los demás.</p>
+
+    <h3>Los cuadros son reales</h3>
+    <p class="sub">Noche de Subasta</p>
+    <p>Veintiuna de las obras de Noche de Subasta son pinturas y fotografías de la bahía
+    Georgian y de las Blue Mountains, de James Portman. No son adorno pegado al final: el tema
+    se rehízo alrededor de ellas. Una galería marca una obra vendida con un pequeño punto rojo
+    junto a la cartela, y eso es lo que recibe una casilla decidida: una marca que deja la
+    imagen en paz, en lugar de una cruz trazada encima.</p>
+
+    <h3>Qué significó aquí la accesibilidad</h3>
+    <p class="sub">Derivada, no declarada</p>
+    <p>El modo oscuro, el modo claro, el alto contraste y una paleta segura para el daltonismo
+    están todos <em>derivados</em> de los colores del propio tema en lugar de dibujarse a mano
+    tema por tema, de manera que un tema nuevo no puede salir con una variante rota. Las
+    razones de contraste se comprueban en la batería de pruebas en cada combinación de tema y
+    modo.</p>
+    <p>Así se detectaron dos fallos reales, corregidos en el origen: un tema dejaba el texto
+    secundario en 2,84:1 sobre un fondo de corcho, y el alto contraste no ayudaba porque solo
+    oscurecía la tinta y dejaba el fondo igual.</p>
+
+    <h3>Cómo se comprueba</h3>
+    <p class="sub">Pruebas</p>
+    <div class="figures">
+      <div class="fig"><b>79</b><span>pruebas, en SQLite</span></div>
+      <div class="fig"><b>15</b><span>de extremo a extremo, en navegador</span></div>
+      <div class="fig"><b>294</b><span>tableros por ronda de fuzz</span></div>
+      <div class="fig"><b>99ms</b><span>peor caso: generar y resolver</span></div>
+    </div>
+    <p>La ronda de fuzz genera cientos de tableros en todas las dificultades y temas, resuelve
+    cada uno sin adivinar y renderiza cada pista en los tres idiomas, buscando cualquier cosa
+    que se lea mal o no se pueda terminar. La batería entera se ejecuta dos veces — una contra
+    SQLite y otra contra un Postgres de verdad — porque los dos discrepan de maneras pequeñas
+    y caras. Una consulta pasaba tan tranquila en SQLite y fallaba en Postgres porque una
+    columna que es booleana en uno es entera en el otro; nueve pruebas se pusieron en rojo en
+    cuanto se encontraron con la base de datos real.</p>
+    <p>Algunos de los mejores errores los encontraron las pruebas y no los jugadores: una
+    escalera de pistas que nunca subía, de modo que dos pulsaciones devolvían la misma pista y
+    todo el presupuesto de pistas podía gastarse en un solo dato; y un panel de pistas que
+    reconstruía el tablero al pasar el ratón, algo inofensivo hasta que las pistas se mudaron a
+    las cartas y empezaron a destruir justo el elemento que estaba bajo el puntero.</p>
+
+    <p class="colophon">Hecho en TypeScript, con el motor sin dependencias en tiempo de
+    ejecución. Publicado en Vercel con Postgres. Obras de James Portman.</p>
+  </div>
+  </section>
+
+  <section class="how legal" id="privacy">
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>Privacy</h2>
+    <p class="standfirst">Short version: the game keeps an email address so you can sign in,
+    a display name so the leaderboard has something to print, and a record of the boards you
+    finished. Nothing else, and none of it is sold or shared.</p>
+
+    <h3>What is kept</h3>
+    <p class="sub">And why each piece exists</p>
+    <p><strong>Your email address.</strong> It is the sign-in. There are no passwords; a
+    six-digit code is mailed to the address and expires in ten minutes. The address is not
+    used for anything else and there is no mailing list to be added to.</p>
+    <p><strong>Your display name.</strong> Whatever you type. It appears on the leaderboards
+    beside your times. It does not have to be your name.</p>
+    <p><strong>Your play records.</strong> For each board you start: which board, when you
+    started and finished, your time, how many hints you used and how many mistakes you made.
+    This is what the leaderboard, the streak and the archive are made of.</p>
+    <p><strong>Nothing on your device but your own settings.</strong> Your theme, language,
+    accessibility choices and — if you play without an account — your local scores live in
+    your browser's own storage. They never leave it. Clearing site data clears them.</p>
+
+    <h3>What is not kept</h3>
+    <p class="sub">Deliberately absent</p>
+    <p>There are no advertising trackers, no analytics scripts, no third-party cookies and no
+    profile built about you. The game does not ask for your location, your contacts or your
+    real name. IP addresses are used only in the moment, to rate-limit sign-in attempts, and
+    are discarded on a rolling basis rather than stored against your account.</p>
+
+    <h3>Who else touches it</h3>
+    <p class="sub">Three suppliers, each doing one job</p>
+    <p>The site runs on <em>Vercel</em>, the database is <em>Neon</em> Postgres, and sign-in
+    codes are delivered by <em>Resend</em>. Each of them processes this data only to run the
+    service. Data is stored in North America. Nobody buys, sells or rents it.</p>
+
+    <h3>Your copy, and your exit</h3>
+    <p class="sub">Both are buttons, not requests</p>
+    <p>Open <em>Settings</em> while signed in. <em>Download my data</em> gives you every row
+    held about you as a JSON file. <em>Delete my account</em> erases your account, your runs
+    and your leaderboard entries permanently — it asks for an emailed code and the word
+    DELETE, and once it is done there is nothing to restore.</p>
+    <p>You can also just write: <a href="mailto:james@portman.ca">james@portman.ca</a>.</p>
+
+    <h3>Children</h3>
+    <p class="sub">Not built for under-13s</p>
+    <p>The game is not directed at children under 13 and accounts are not knowingly created
+    for them. If you believe a child has signed up, write to the address above and the
+    account will be removed.</p>
+
+    <h3>Changes</h3>
+    <p class="sub">Dated, not silent</p>
+    <p>If this policy changes in a way that affects what is collected, the date below changes
+    and a notice appears in the game. <span class="colophon">Last updated 22 August 2026.</span></p>
+  </section>
+
+  <section class="how legal" id="terms">
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>Terms of use</h2>
+    <p class="standfirst">A puzzle game, offered as it is, for free. These are the terms that
+    come with it.</p>
+
+    <h3>The account</h3>
+    <p class="sub">Yours to keep, yours to close</p>
+    <p>An account is free and optional — every board is playable without one. You are
+    responsible for the email address you sign in with and for what is done under your
+    account. One account per person; a display name that is abusive, impersonates someone
+    else or is used to advertise may be changed or removed.</p>
+
+    <h3>Fair play</h3>
+    <p class="sub">The leaderboard is the only thing worth protecting</p>
+    <p>Play the boards as they are given. Automating play, scripting the API, sharing
+    solutions before a board's day is over, or running several accounts to farm a leaderboard
+    are all grounds for having results removed and the account closed. Archive boards are
+    marked as played late and never count toward a streak — that is by design, not a bug to
+    be worked around.</p>
+
+    <h3>The artwork</h3>
+    <p class="sub">Not covered by anything here</p>
+    <p>The paintings and photographs in the game are the copyright of James Portman and are
+    licensed for use in this game only. They may not be copied, reproduced or redistributed.
+    Your result grid is yours: share it anywhere you like.</p>
+
+    <h3>What is promised</h3>
+    <p class="sub">Honestly, not much</p>
+    <p>The game is provided as is, without warranty of any kind. It may be unavailable, lose
+    data, or stop existing. Boards are deterministic and can be regenerated, but scores and
+    streaks are not guaranteed against loss. Nothing here excludes liability that cannot be
+    excluded by law; otherwise, liability is limited to what you paid to play, which is
+    nothing.</p>
+
+    <h3>Ending it</h3>
+    <p class="sub">Either side, any time</p>
+    <p>You may delete your account at any time from Settings. Accounts may be suspended or
+    closed for breaking the fair-play terms above. These terms are governed by the laws of
+    the Province of Ontario, Canada.</p>
+    <p class="colophon">Last updated 22 August 2026. Questions:
+    <a href="mailto:james@portman.ca">james@portman.ca</a>.</p>
   </section>
 </div>
-<footer class="site-foot"><a href="#how">How it was built</a></footer>
+<footer class="site-foot"><a href="#how">How it was built</a><a href="#privacy">Privacy</a><a href="#terms">Terms</a></footer>
 <div class="toast" id="toast"></div>
 <div id="overlay"></div>
 <script type="module">

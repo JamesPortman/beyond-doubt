@@ -75,6 +75,9 @@ export class PostgresStore implements Store {
       CREATE INDEX IF NOT EXISTS room_members_room ON room_members(room_id);
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at BIGINT NOT NULL);
+      CREATE TABLE IF NOT EXISTS rate_hits (
+        key TEXT NOT NULL, at BIGINT NOT NULL);
+      CREATE INDEX IF NOT EXISTS rate_hits_key ON rate_hits(key, at);
     `);
   }
 
@@ -91,6 +94,15 @@ export class PostgresStore implements Store {
     // every aggregate comes back as a string from pg, as everywhere else in this file
     const r = (row ?? {}) as Record<string, string | number>;
     return { ahead: Number(r.ahead ?? 0), total: Number(r.total ?? 0), perfect: Number(r.perfect ?? 0) };
+  }
+
+  async hitRateLimit(key: string, windowMs: number, now: number): Promise<number> {
+    const from = now - windowMs;
+    await this.q('DELETE FROM rate_hits WHERE at < $1', [from]);
+    await this.q('INSERT INTO rate_hits (key, at) VALUES ($1, $2)', [key, now]);
+    const r = await this.one('SELECT COUNT(*) AS n FROM rate_hits WHERE key = $1 AND at >= $2', [key, from]);
+    // COUNT comes back a string from pg, as everywhere else in this file
+    return Number((r as { n?: string | number } | undefined)?.n ?? 0);
   }
 
   /* ---------- operator settings ---------- */
@@ -229,13 +241,11 @@ export class PostgresStore implements Store {
     return i === -1 ? null : i + 1;
   }
 
-  async streak(userId: string, isoDates: string[]): Promise<number> {
+  async playedDates(userId: string): Promise<string[]> {
     const rows = await this.q<{ iso_date: string }>(
-      'SELECT DISTINCT iso_date FROM results WHERE user_id = $1 AND iso_date IS NOT NULL AND late = 0', [userId]);
-    const done = new Set(rows.map((r) => r.iso_date));
-    let n = 0;
-    for (const d of isoDates) { if (!done.has(d)) break; n++; }
-    return n;
+      `SELECT DISTINCT iso_date FROM results
+        WHERE user_id = $1 AND iso_date IS NOT NULL AND late = 0 ORDER BY iso_date`, [userId]);
+    return rows.map((r) => r.iso_date);
   }
 
   async resultsByEdition(userId: string, editionIds: string[]): Promise<Map<string, ResultRow>> {
@@ -243,6 +253,29 @@ export class PostgresStore implements Store {
     const rows = await this.q('SELECT * FROM results WHERE user_id = $1 AND edition_id = ANY($2)',
       [userId, editionIds]);
     return new Map(rows.map((r) => [String(r.edition_id), resultRow(r)!]));
+  }
+
+  async exportUser(userId: string): Promise<{ user: UserRow; plays: PlayRow[]; results: ResultRow[] }> {
+    return {
+      user: (await this.one<UserRow>('SELECT * FROM users WHERE id = $1', [userId]))!,
+      plays: await this.q<PlayRow>('SELECT * FROM plays WHERE user_id = $1 ORDER BY started_at', [userId]),
+      results: await this.q<ResultRow>('SELECT * FROM results WHERE user_id = $1 ORDER BY submitted_at', [userId]),
+    };
+  }
+
+  async deleteUser(userId: string): Promise<Record<string, number>> {
+    const user = await this.one<{ email: string }>('SELECT email FROM users WHERE id = $1', [userId]);
+    const n: Record<string, number> = {};
+    const run = async (label: string, sql: string, arg: string) => {
+      n[label] = (await this.pool.query(sql, [arg])).rowCount ?? 0;
+    };
+    await run('results', 'DELETE FROM results WHERE user_id = $1', userId);
+    await run('plays', 'DELETE FROM plays WHERE user_id = $1', userId);
+    await run('rooms', 'DELETE FROM room_members WHERE user_id = $1', userId);
+    await run('tokens', 'DELETE FROM tokens WHERE user_id = $1', userId);
+    if (user) await run('codes', 'DELETE FROM auth_codes WHERE email = $1', user.email);
+    await run('user', 'DELETE FROM users WHERE id = $1', userId);
+    return n;
   }
 
   /* ---------- rooms ---------- */

@@ -8,7 +8,8 @@ import { Session } from '../core/session.js';
 import { Puzzle, PlacedClue, PuzzleView, generate } from '../core/generate.js';
 import { State } from '../core/clue.js';
 import { scoreRun } from '../core/scoring.js';
-import { dailyEdition, weeklyEdition, archiveEdition, weekId, isoDate, weekdayDifficulty, EditionRef } from '../core/edition.js';
+import { dailyEdition, weeklyEdition, archiveEdition, weekId, isoDate, weekdayDifficulty, EditionRef, GAME_TZ, civilDate, gameToday } from '../core/edition.js';
+import { streakStats } from '../core/streak.js';
 import { getTheme, themeIds } from '../themes/index.js';
 import '../themes/all.js';
 import { Flags, FLAGS_KEY, sanitizeFlags } from './flags.js';
@@ -17,7 +18,11 @@ export interface ServerOptions {
   dbPath?: string;
   /** inject a different backend — Postgres in production, SQLite locally */
   store?: Store;
-  /** the first day this game existed; nothing before it is playable */
+  /** The first day this game existed. The archive walks back to it and refuses anything
+   *  earlier, so it is a real product decision rather than a constant: set it early and
+   *  the archive has depth on day one, set it to the day you shipped and it fills up one
+   *  board at a time. Must be YYYY-MM-DD — the comparisons are string comparisons, so an
+   *  unpadded month would fail silently and in a way nobody would think to look for. */
   launchDate?: string;
   /** dev returns the login code in the response instead of emailing it */
   dev?: boolean;
@@ -31,6 +36,9 @@ export interface ServerOptions {
   allowedOrigins?: string[];
   /** how login codes reach the player. Dev returns them in the response instead. */
   sendEmail?: (to: string, subject: string, body: string) => Promise<void>;
+  /** The zone the calendar runs in. A daily that rolls over in UTC arrives at 8pm the
+   *  night before for anyone in Eastern time, which is nobody's idea of a new day. */
+  timezone?: string;
   /** Shared secret for /api/admin/*. Absent or short and the admin surface does not
    *  exist at all — there is no default, and no password to guess. */
   adminToken?: string;
@@ -45,6 +53,25 @@ const ADMIN_TOKEN_MIN = 24;
  *  something off is usually doing it because something is wrong, and should not have to
  *  wait. Five seconds is the compromise. */
 const FLAGS_TTL_MS = 5_000;
+/** Sign-in throttle. A code request costs us an email and costs the recipient an
+ *  interruption, so both the sender's address and the address being mailed are capped.
+ *  Generous enough that a person who mistypes their address twice never notices. */
+const SIGNIN_WINDOW_MS = 15 * 60_000;
+const SIGNIN_PER_IP = 12;
+const SIGNIN_PER_EMAIL = 5;
+
+/** Until someone chooses one, the game has always existed since the day it is asked. */
+const DEFAULT_LAUNCH = () => isoDate(new Date());
+
+/** A launch date only works as a plain ISO day, because every check against it is a string
+ *  comparison. Anything else is refused loudly here rather than quietly skewing the archive. */
+export function isoLaunch(v: string | undefined): string {
+  if (v === undefined || v === '') return DEFAULT_LAUNCH();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(new Date(`${v}T12:00:00Z`).getTime())) {
+    throw new Error(`launchDate must be YYYY-MM-DD, got ${JSON.stringify(v)}`);
+  }
+  return v;
+}
 
 /** The player-facing view of the flags. Deliberately the same shape minus `signups`,
  *  which is nobody's business but the operator's. */
@@ -84,13 +111,17 @@ export class GameServer {
       now: o.now ?? (() => Date.now()),
       hintBudget: o.hintBudget ?? HINT_BUDGET,
       minMoveIntervalMs: o.minMoveIntervalMs ?? 40,
-      launchDate: o.launchDate ?? '2026-06-01',
+      launchDate: isoLaunch(o.launchDate),
       allowedOrigins: o.allowedOrigins ?? (o.dev === false ? [] : ['*']),
       sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
+      timezone: o.timezone ?? GAME_TZ,
       adminToken: o.adminToken ?? '',
       staticDir: o.staticDir,
     };
   }
+
+  /** The board a player should be handed right now, resolved in the game's own zone. */
+  private today_(): Date { return gameToday(new Date(this.now()), this.opts.timezone); }
 
   /* ---------------------------- operator flags ---------------------------- */
 
@@ -154,7 +185,7 @@ export class GameServer {
 
   private async refFor(body: P.StartBody): Promise<{ ref: EditionRef; ranked: boolean }> {
     const flags = await this.flags();
-    const today = new Date(this.now());
+    const today = this.today_();
     const ids = themeIds();
     if (!ids.includes(body.themeId)) throw new HttpError(400, 'unknown-theme');
     this.gate(flags, body.mode, body.themeId);
@@ -226,9 +257,25 @@ export class GameServer {
 
   /* ------------------------------- API ------------------------------- */
 
-  async authRequest(b: P.AuthRequestBody): Promise<P.AuthRequestResult> {
+  /** Vercel and every other proxy in front of this put the caller first in
+   *  x-forwarded-for. Behind no proxy the socket address is the truth. Either way it is
+   *  a hint, not an identity — which is why the email key below exists as well. */
+  private clientIp(req?: IncomingMessage): string {
+    const fwd = String(req?.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+    return fwd || req?.socket?.remoteAddress || 'unknown';
+  }
+
+  private async throttle(key: string, limit: number): Promise<void> {
+    const n = await this.store.hitRateLimit(key, SIGNIN_WINDOW_MS, this.now());
+    if (n > limit) throw new HttpError(429, 'too-many-requests');
+  }
+
+  async authRequest(b: P.AuthRequestBody, req?: IncomingMessage): Promise<P.AuthRequestResult> {
     const email = String(b.email ?? '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'bad-email');
+    // The IP cap first: it is the one an attacker cannot vary by editing the form.
+    await this.throttle(`ip:${this.clientIp(req)}`, SIGNIN_PER_IP);
+    await this.throttle(`email:${email}`, SIGNIN_PER_EMAIL);
     const code = String(randomInt(100000, 1000000));
     await this.store.putAuthCode(email, code, this.now() + CODE_TTL);
     if (!this.opts.dev) {
@@ -240,8 +287,11 @@ export class GameServer {
     return { sent: true, devCode: code };
   }
 
-  async authVerify(b: P.AuthVerifyBody): Promise<P.AuthVerifyResult> {
+  async authVerify(b: P.AuthVerifyBody, req?: IncomingMessage): Promise<P.AuthVerifyResult> {
     const email = String(b.email ?? '').trim().toLowerCase();
+    // Six digits is a million guesses, which is nothing at HTTP speed if nobody counts.
+    await this.throttle(`vip:${this.clientIp(req)}`, SIGNIN_PER_IP);
+    await this.throttle(`vemail:${email}`, SIGNIN_PER_EMAIL * 2);
     if (!await this.store.checkAuthCode(email, String(b.code ?? ''), this.now())) {
       throw new HttpError(401, 'bad-code');
     }
@@ -286,7 +336,10 @@ export class GameServer {
       previousResult: prior ? {
         editionId: prior.edition_id, timeMs: prior.time_ms, timeAddedMs: prior.mistakes * 60_000, hintsUsed: prior.hints,
         mistakes: prior.mistakes, score: prior.score, perfect: !!prior.perfect,
-        ranked: true, rank: await this.store.rankOf(ref.id, user.id), streak: 0,
+        ranked: true, rank: await this.store.rankOf(ref.id, user.id),
+        // the streak as it stands now, not as it stood when they finished that run
+        ...(({ current, best }) => ({ streak: current, bestStreak: best }))(
+          streakStats(await this.store.playedDates(user.id), civilDate(this.today_(), 'UTC'))),
       } : null,
     };
   }
@@ -338,17 +391,18 @@ export class GameServer {
           time_ms: elapsed, hints: session.hintsUsed, mistakes: session.mistakes,
           score: s.score, perfect: s.perfect ? 1 : 0, submitted_at: finished,
           play_id: row.id, iso_date: playedDate,
-          late: playedDate && playedDate !== isoDate(new Date(finished)) ? 1 : 0,
+          late: playedDate && playedDate !== civilDate(new Date(finished), this.opts.timezone) ? 1 : 0,
         });
         ranked = outcome === 'recorded';
       }
-      const dates: string[] = [];
-      for (let i = 0; i < 40; i++) dates.push(isoDate(new Date(finished - i * 86400_000)));
+      const stats = streakStats(await this.store.playedDates(user.id),
+        civilDate(new Date(finished), this.opts.timezone));
       result = {
         editionId: row.edition_id, timeMs: elapsed, timeAddedMs: s.timeAddedMs, hintsUsed: session.hintsUsed,
         mistakes: session.mistakes, score: s.score, perfect: s.perfect, ranked,
         rank: ranked ? await this.store.rankOf(row.edition_id, user.id) : null,
-        streak: await this.store.streak(user.id, dates),
+        streak: stats.current,
+        bestStreak: stats.best,
         ...bands(await this.store.standing(row.edition_id, user.id)),
       };
       this.live.delete(b.playId);
@@ -463,7 +517,7 @@ export class GameServer {
     if (!(await this.flags()).archive) throw new HttpError(403, 'archive-disabled');
     const ids = themeIds();
     const themeId = ids.includes(b.themeId) ? b.themeId : ids[0];
-    const today = new Date(this.now());
+    const today = this.today_();
     const todayIso = isoDate(today);
     const beforeIso = b.before && /^\d{4}-\d{2}-\d{2}$/.test(b.before) && b.before <= todayIso
       ? b.before : todayIso;
@@ -525,12 +579,12 @@ export class GameServer {
   async health(): Promise<{ ok: boolean; uptimeMs: number; db: boolean; generator: boolean; version: string }> {
     let db = false, generator = false;
     try { await this.store.userById('healthcheck'); db = true; } catch { /* reported below */ }
-    try { generator = this.puzzleFor(dailyEdition(themeIds(), new Date(this.now()))).n > 0; } catch { /* ditto */ }
+    try { generator = this.puzzleFor(dailyEdition(themeIds(), this.today_())).n > 0; } catch { /* ditto */ }
     return { ok: db && generator, uptimeMs: Date.now() - this.startedAt, db, generator, version: '0.1.0' };
   }
 
   async today(): Promise<P.TodayResult> {
-    const today = new Date(this.now());
+    const today = this.today_();
     const ids = themeIds();
     const flags = await this.flags();
     return {
@@ -545,6 +599,57 @@ export class GameServer {
         };
       }),
     };
+  }
+
+  /** Everything the home screen needs to greet a returning player: who they are, and
+   *  the streak they are protecting. Cheap enough to call on every load. */
+  async me(user: UserRow): Promise<P.MeResult> {
+    const played = await this.store.playedDates(user.id);
+    const st = streakStats(played, civilDate(this.today_(), 'UTC'));
+    return {
+      user: { id: user.id, displayName: user.display_name, email: user.email },
+      streak: st.current, bestStreak: st.best, playedToday: st.playedToday, atRisk: st.atRisk,
+      daysPlayed: played.length,
+    };
+  }
+
+  /* ------------------------- account controls ------------------------- */
+
+  /** A copy of everything, in the only format that is honestly complete: the rows
+   *  themselves. No summary, because a summary is us deciding what they get to see. */
+  async accountExport(user: UserRow): Promise<P.ExportResult> {
+    const raw = await this.store.exportUser(user.id);
+    return {
+      exportedAt: this.now(),
+      account: {
+        id: raw.user.id, email: raw.user.email,
+        displayName: raw.user.display_name, createdAt: raw.user.created_at,
+      },
+      plays: raw.plays.map((p) => ({
+        editionId: p.edition_id, themeId: p.theme_id, mode: p.week_id ? 'weekly' : 'daily',
+        date: p.iso_date, ranked: !!p.ranked, startedAt: p.started_at, finishedAt: p.finished_at,
+        hints: p.hints, mistakes: p.mistakes, refusals: p.refusals, status: p.status,
+      })),
+      results: raw.results.map((r) => ({
+        editionId: r.edition_id, themeId: r.theme_id, date: r.iso_date, weekId: r.week_id,
+        timeMs: r.time_ms, hints: r.hints, mistakes: r.mistakes, score: r.score,
+        perfect: !!r.perfect, late: !!r.late, submittedAt: r.submitted_at,
+      })),
+    };
+  }
+
+  /** Deleting an account is irreversible, so it takes more than a live session: the
+   *  player proves the address still theirs with a fresh emailed code. A stolen phone
+   *  should not be able to erase someone's five-year streak. */
+  async accountDelete(user: UserRow, b: { code?: string; confirm?: string }): Promise<P.DeleteResult> {
+    if (String(b?.confirm ?? '').trim().toUpperCase() !== 'DELETE') {
+      throw new HttpError(400, 'confirm-required');
+    }
+    if (!await this.store.checkAuthCode(user.email, String(b?.code ?? ''), this.now())) {
+      throw new HttpError(401, 'bad-code');
+    }
+    const removed = await this.store.deleteUser(user.id);
+    return { deleted: true, removed };
   }
 
   /* ---------------------------- transport ---------------------------- */
@@ -590,12 +695,11 @@ export class GameServer {
 
   private async route(path: string, body: any, req: IncomingMessage): Promise<unknown> {
     switch (path) {
-      case '/api/auth/request': return this.authRequest(body);
-      case '/api/auth/verify': return this.authVerify(body);
-      case '/api/me': {
-        const u = await this.auth(req);
-        return { id: u.id, displayName: u.display_name, email: u.email };
-      }
+      case '/api/auth/request': return this.authRequest(body, req);
+      case '/api/auth/verify': return this.authVerify(body, req);
+      case '/api/me': return this.me(await this.auth(req));
+      case '/api/account/export': return this.accountExport(await this.auth(req));
+      case '/api/account/delete': return this.accountDelete(await this.auth(req), body);
       case '/api/play/start': return this.start(await this.auth(req), body);
       case '/api/play/move': return this.move(await this.auth(req), body);
       case '/api/play/hint': return this.hint(await this.auth(req), body);

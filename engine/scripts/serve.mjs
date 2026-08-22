@@ -23,6 +23,7 @@ const srv = new GameServer({
   staticDir: join(here, '..', 'demo', 'dist'),
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   adminToken: process.env.ADMIN_TOKEN,
+  launchDate: process.env.LAUNCH_DATE,
 });
 
 if (prod) {
