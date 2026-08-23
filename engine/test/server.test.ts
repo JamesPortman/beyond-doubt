@@ -673,7 +673,11 @@ test('the launch date is a real choice, and a malformed one is refused loudly', 
     assert.throws(() => new GameServer({ launchDate: bad }), /launchDate must be YYYY-MM-DD|Invalid/,
       `accepted ${bad}`);
   }
-  assert.equal(isoLaunch(undefined), isoDate(new Date()));
+  // and the default follows the clock it is given, not the machine's — otherwise a test
+  // written today quietly starts failing tomorrow, which is how this was found
+  assert.equal(isoLaunch(undefined, clk.now()), '2026-08-22');
+  assert.equal(isoLaunch(undefined, new Date('2026-03-14T03:00:00Z').getTime()), '2026-03-13',
+    'the launch day is the civil day in the game\'s zone, not UTC\'s');
 });
 
 test('the day rolls over at midnight Eastern, not at 8pm', async () => {

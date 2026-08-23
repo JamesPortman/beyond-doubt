@@ -61,12 +61,14 @@ const SIGNIN_PER_IP = 12;
 const SIGNIN_PER_EMAIL = 5;
 
 /** Until someone chooses one, the game has always existed since the day it is asked. */
-const DEFAULT_LAUNCH = () => isoDate(new Date());
-
 /** A launch date only works as a plain ISO day, because every check against it is a string
- *  comparison. Anything else is refused loudly here rather than quietly skewing the archive. */
-export function isoLaunch(v: string | undefined): string {
-  if (v === undefined || v === '') return DEFAULT_LAUNCH();
+ *  comparison. Anything else is refused loudly here rather than quietly skewing the archive.
+ *
+ *  The default reads the clock it is handed, not the wall clock. Everywhere else in this
+ *  server "now" is injectable, and a single place that reaches for the real time makes a
+ *  server with a frozen clock disagree with itself about which days ever existed. */
+export function isoLaunch(v: string | undefined, at: number = Date.now(), tz: string = GAME_TZ): string {
+  if (v === undefined || v === '') return civilDate(new Date(at), tz);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(new Date(`${v}T12:00:00Z`).getTime())) {
     throw new Error(`launchDate must be YYYY-MM-DD, got ${JSON.stringify(v)}`);
   }
@@ -105,16 +107,19 @@ export class GameServer {
 
   constructor(o: ServerOptions = {}) {
     this.store = o.store ?? new SqliteStore(o.dbPath ?? ':memory:');
+    // resolved before the option block, because the launch-date default reads both
+    const now = o.now ?? (() => Date.now());
+    const timezone = o.timezone ?? GAME_TZ;
     this.opts = {
       dbPath: o.dbPath ?? ':memory:',
       dev: o.dev ?? true,
-      now: o.now ?? (() => Date.now()),
+      now,
       hintBudget: o.hintBudget ?? HINT_BUDGET,
       minMoveIntervalMs: o.minMoveIntervalMs ?? 40,
-      launchDate: isoLaunch(o.launchDate),
+      launchDate: isoLaunch(o.launchDate, now(), timezone),
       allowedOrigins: o.allowedOrigins ?? (o.dev === false ? [] : ['*']),
       sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
-      timezone: o.timezone ?? GAME_TZ,
+      timezone,
       adminToken: o.adminToken ?? '',
       staticDir: o.staticDir,
     };

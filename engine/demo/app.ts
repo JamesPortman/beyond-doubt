@@ -301,21 +301,16 @@ class App {
 
   /* ---------------- chrome ---------------- */
 
-  /** The article exists three times in the page, once per language, and the language
-   *  picker chooses between them. Translating an essay by string table would have been a
-   *  worse essay in all three languages. */
-  paintArticle() {
-    for (const n of Array.from(document.querySelectorAll<HTMLElement>('.how-body'))) {
-      const mine = n.dataset.lang === this.prefs.locale;
-      n.hidden = !mine;
-    }
-    const foot = document.querySelector<HTMLElement>('.site-foot a[href="#how"]');
+  /** The article lives on its own page, which reads the language out of the same stored
+   *  prefs — so the only thing to do here is label the door in the right language. */
+  paintArticleLink() {
+    const foot = document.querySelector<HTMLElement>('.site-foot a.how-link');
     if (foot) foot.textContent = { en: 'How it was built', pt: 'Como foi construído', es: 'Cómo se construyó' }[this.prefs.locale];
     document.documentElement.lang = this.prefs.locale;
   }
 
   buildChrome() {
-    this.paintArticle();
+    this.paintArticleLink();
     const gameSel = $('#game') as HTMLSelectElement;
     gameSel.innerHTML = '';
     const open = allThemes().filter((t) => this.themeAllowed(t.id));

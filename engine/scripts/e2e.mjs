@@ -34,7 +34,7 @@ const results = [];
 let failed = 0;
 async function check(name, fn) {
   try { await fn(); results.push(`  ok   ${name}`); }
-  catch (e) { failed++; results.push(`  FAIL ${name}\n         ${e.message.split('\n')[0]}`); }
+  catch (e) { failed++; results.push(`  FAIL ${name}\n${e.message.split('\n').map((l) => `         ${l}`).join('\n')}`); }
 }
 
 const browser = await chromium.launch();
@@ -167,30 +167,45 @@ await check('the board can be solved to the end and shows a result with a share 
 await check('the footer offers the privacy policy and the terms, and both are on the page', async () => {
   const links = await page.$$eval('.site-foot a', (n) => n.map((a) => a.getAttribute('href')));
   assert.ok(links.includes('#privacy') && links.includes('#terms'), `footer links were ${links}`);
-  for (const id of ['privacy', 'terms', 'how']) {
+  for (const id of ['privacy', 'terms']) {
     const words = await page.$eval(`#${id}`, (n) => (n.textContent ?? '').trim().split(/\s+/).length);
     assert.ok(words > 150, `#${id} has only ${words} words`);
   }
 });
 
-await check('the article follows the language picker, one version visible at a time', async () => {
+await check('the article is its own page, reachable from the game, in all three languages', async () => {
   await page.reload();
   await page.waitForSelector('.cell', { timeout: 15000 });
+  const link = await page.$eval('.site-foot a.how-link', (a) => a.getAttribute('href'));
+  assert.equal(link, 'how.html', `the footer points at ${link}`);
+  await page.click('.site-foot a.how-link');
+  await page.waitForSelector('#how .how-body', { timeout: 10000 });
+  assert.match(page.url(), /how\.html$/);
+
   const visible = () => page.$$eval('.how-body', (n) => n.filter((x) => !x.hidden).map((x) => x.dataset.lang));
-  assert.deepEqual(await visible(), ['en']);
+  assert.deepEqual(await visible(), ['en'], 'more than one language is showing at once');
+  // the palette comes from the game's own settings, not a second copy of the colours
+  const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  assert.match(bg, /^#[0-9a-f]{6}$/i, `the theme palette did not apply (--bg was "${bg}")`);
+
   await page.selectOption('#lang', 'pt');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(300);
   assert.deepEqual(await visible(), ['pt'], 'the article did not follow the language picker');
   const head = await page.$eval('.how-body[data-lang=pt] h2', (n) => n.textContent);
   assert.match(head, /constru/i, `the Portuguese article is headed "${head}"`);
   await page.selectOption('#lang', 'es');
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(300);
   assert.deepEqual(await visible(), ['es']);
   // and every version says roughly as much — a stub translation is worse than none
   const lengths = await page.$$eval('.how-body', (n) => n.map((x) => (x.textContent ?? '').split(/\s+/).length));
   assert.ok(Math.min(...lengths) > 800, `one version is only ${Math.min(...lengths)} words`);
+
+  // the language choice is one setting, shared with the game
   await page.selectOption('#lang', 'en');
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(200);
+  await page.click('#back');
+  await page.waitForSelector('.cell', { timeout: 15000 });
+  assert.equal(await page.$eval('#lang', (n) => n.value), 'en', 'the game and the article disagree about the language');
 });
 
 await check('the admin surface is not reachable without the token', async () => {
@@ -212,10 +227,12 @@ await check('a player can sign in, and their data comes back to them on request'
   await page.fill('.signin input[type=email]', 'e2e@example.com');
   await page.fill('.signin input[type=text]', 'E2E Player');
   await page.click('.signin .primary');                 // send code — dev mode fills it in
-  await page.waitForTimeout(500);
+  // Wait for the code field to appear rather than a fixed pause: `.who` already exists
+  // in local mode, so waiting on the selector races against the text changing.
+  await page.waitForSelector('.signin input[placeholder="6-digit code"]:visible', { timeout: 10000 });
   await page.click('.signin .primary');                 // verify
-  await page.waitForSelector('#account .who', { timeout: 10000 });
-  assert.equal(await page.$eval('#account .who', (n) => n.textContent), 'E2E Player');
+  await page.waitForFunction(
+    () => document.querySelector('#account .who')?.textContent === 'E2E Player', null, { timeout: 10000 });
 
   const dump = await page.evaluate(async () => {
     const token = localStorage.getItem('clues.token');
