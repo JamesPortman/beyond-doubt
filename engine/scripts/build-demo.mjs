@@ -22,20 +22,35 @@ if (existsSync('demo/assets')) {
 }
 console.log(`demo/dist/index.html  ${(html.length / 1024).toFixed(0)} KB (self-contained)`);
 
-/* ---- the article, as its own page ----------------------------------------
- * It shares the game's stylesheet rather than owning a copy: the <style> block is lifted
- * straight out of the game's template at build time, so a colour or a type scale changed
- * for the game cannot drift away from the page that describes it. */
-const howRes = await build({
-  entryPoints: ['demo/how.ts'],
-  bundle: true, format: 'esm', target: 'es2022',
-  write: false, minify: false, legalComments: 'none',
-});
+/* ---- the standalone pages -------------------------------------------------
+ * The article, the architecture write-up, the policies and the account page are all the
+ * same shell: the game's stylesheet, lifted straight out of its template at build time so
+ * a colour changed for the game cannot drift away from the pages around it, plus one
+ * script and (for the prose pages) one body of text. */
 const gameStyle = /<style>[\s\S]*?<\/style>/.exec(readFileSync('demo/template.html', 'utf8'));
-if (!gameStyle) throw new Error('could not find the game stylesheet to share with how.html');
-const how = readFileSync('demo/how-template.html', 'utf8')
-  .replace('<!--STYLE-->', () => gameStyle[0])
-  .replace('<!--ARTICLE-->', () => readFileSync('demo/how-article.html', 'utf8'))
-  .replace('/*HOW*/', () => howRes.outputFiles[0].text);
-writeFileSync('demo/dist/how.html', how);
-console.log(`demo/dist/how.html    ${(how.length / 1024).toFixed(0)} KB`);
+if (!gameStyle) throw new Error('could not find the game stylesheet to share with the other pages');
+
+async function bundle(entry) {
+  const r = await build({
+    entryPoints: [entry],
+    bundle: true, format: 'esm', target: 'es2022',
+    write: false, minify: false, legalComments: 'none',
+  });
+  return r.outputFiles[0].text;
+}
+const proseJs = await bundle('demo/how.ts');
+const accountJs = await bundle('demo/account.ts');
+
+for (const [out, template, article, js] of [
+  ['demo/dist/how.html', 'demo/how-template.html', 'demo/how-article.html', proseJs],
+  ['demo/dist/tech.html', 'demo/tech-template.html', 'demo/tech-article.html', proseJs],
+  ['demo/dist/legal.html', 'demo/legal-template.html', 'demo/legal-article.html', proseJs],
+  ['demo/dist/account.html', 'demo/account-template.html', null, accountJs],
+]) {
+  const text = readFileSync(template, 'utf8')
+    .replace('<!--STYLE-->', () => gameStyle[0])
+    .replace('<!--ARTICLE-->', () => (article ? readFileSync(article, 'utf8') : ''))
+    .replace('/*HOW*/', () => js);
+  writeFileSync(out, text);
+  console.log(`${out.padEnd(21)} ${(text.length / 1024).toFixed(0)} KB`);
+}

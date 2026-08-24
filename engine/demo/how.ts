@@ -23,11 +23,11 @@ function paint(): void {
   document.body.className = `skin-${theme.id}`;
 
   const locale = ALL_LOCALES.includes(prefs.locale) ? prefs.locale : 'en';
-  for (const n of Array.from(document.querySelectorAll<HTMLElement>('.how-body'))) {
-    n.hidden = n.dataset.lang !== locale;
-  }
-  root.lang = locale;
-  document.title = TITLE[locale];
+  const bodies = Array.from(document.querySelectorAll<HTMLElement>('.how-body'));
+  for (const n of bodies) n.hidden = n.dataset.lang !== locale;
+  // The same script serves the legal page, which is written once and in English only —
+  // so the language machinery applies itself only where there is something to switch.
+  if (bodies.length) { root.lang = locale; document.title = TITLE[locale]; }
   const back = document.getElementById('back');
   if (back) back.textContent = BACK[locale];
   const sel = document.getElementById('lang') as HTMLSelectElement | null;

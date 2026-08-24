@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beyond Doubt — your account</title>
+  <meta name="description" content="Sign in to Beyond Doubt. No password — we email you a six-digit code.">
+  <meta name="theme-color" content="#f0e7d4">
+  <meta property="og:title" content="Beyond Doubt — your account">
+  <meta property="og:description" content="The daily board is free and needs no account. Sign in and the game starts keeping score.">
+  <meta property="og:type" content="article">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f0e7d4'/%3E%3Ccircle cx='11' cy='12' r='5' fill='%233f7a4f'/%3E%3Ccircle cx='21' cy='12' r='5' fill='%233f7a4f'/%3E%3Ccircle cx='11' cy='22' r='5' fill='%23d2601a'/%3E%3Ccircle cx='21' cy='22' r='5' fill='%233f7a4f'/%3E%3C/svg%3E">
+<!--STYLE-->
+<style>
+  /* The article is the whole page here, so it starts at the top rather than below a
+     board — and the rule that separated it from the game is gone with the game. */
+  .how{margin-top:0;padding-top:0;border-top:0}
+  .page-head{max-width:42rem;margin:0 auto;display:flex;align-items:center;
+    justify-content:space-between;gap:16px;padding:22px 0 30px}
+  .page-head a.back{color:var(--ink-soft);text-decoration:none;font-size:.9rem;
+    border-bottom:1px solid var(--line);padding-bottom:2px}
+  .page-head a.back:hover{color:var(--accent);border-bottom-color:var(--accent)}
+  .page-foot{max-width:42rem;margin:56px auto 0;padding-top:26px;border-top:1px solid var(--line);
+    display:flex;gap:18px;flex-wrap:wrap;font-size:.86rem}
+  .page-foot a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:2px}
+  .page-foot a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+  /* ---------- the account page ----------
+     Narrower than the article, because a form that runs the full measure reads as a
+     wall. One card, one job, and the destructive thing looks destructive. */
+  .account{max-width:33rem;margin:0 auto;padding-bottom:20px}
+  /* Every layout rule below sets a display, which silently beats the hidden attribute —
+     the reason a two-step form showed both steps at once until this line existed. */
+  .account [hidden]{display:none !important}
+  .account .mark{display:block;margin:0 auto 22px;width:52px;height:52px}
+  .account h1.welcome{font-family:var(--font-display);font-size:clamp(1.9rem,6vw,2.6rem);
+    line-height:1.05;margin:0 0 12px;text-align:center;letter-spacing:-.015em;text-wrap:balance}
+  .account .lede{color:var(--ink-soft);line-height:1.6;margin:0 0 26px;text-align:center}
+  .account .card{background:var(--surface);border:1px solid var(--line);border-radius:8px;
+    padding:22px 22px 20px}
+  .account .card.danger-card{border-color:var(--state-b)}
+  .account .card h2{font-family:var(--font-display);font-size:1.12rem;margin:0 0 6px}
+  .account .sub-note{color:var(--ink-soft);font-size:.9rem;line-height:1.55;margin:0 0 18px}
+  .account .fields{display:flex;flex-direction:column;gap:14px}
+  .account .field-row{display:grid;grid-template-columns:7.5rem 1fr;gap:12px;align-items:start}
+  .account .field-row label{font-size:.92rem;font-weight:600;padding-top:10px}
+  .account .field-stack{display:flex;flex-direction:column;gap:5px}
+  .account .field{width:100%;background:var(--bg);color:var(--ink);border:1px solid var(--line);
+    border-radius:5px;padding:10px 12px;font:inherit;font-size:.95rem}
+  .account .field:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .account .field:disabled{opacity:.6}
+  .account .hint{color:var(--ink-soft);font-size:.8rem;line-height:1.4}
+  .account .actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:4px}
+  /* the row of buttons directly under the greeting needs air; the ones inside a card do not */
+  #account-main > .actions{margin:22px 0 26px}
+  .account button,.account .as-button{background:var(--surface-alt);color:var(--ink);
+    border:1px solid var(--line);border-radius:5px;padding:10px 16px;font:inherit;font-size:.92rem;
+    cursor:pointer;text-decoration:none;display:inline-block}
+  .account button:hover,.account .as-button:hover{border-color:var(--accent);color:var(--accent)}
+  .account .primary{background:var(--accent);border-color:var(--accent);color:var(--bg);font-weight:600}
+  .account .primary:hover{color:var(--bg);opacity:.92}
+  .account button.danger{border-color:var(--state-b);color:var(--state-b)}
+  .account button.link-btn{background:none;border:none;color:var(--ink-soft);
+    text-decoration:underline;padding:10px 2px}
+  .account button:disabled{opacity:.55;cursor:default}
+  .account .note{font-size:.88rem;line-height:1.5;margin:2px 0 0;min-height:1.2em;color:var(--ink-soft)}
+  .account .note.good{color:var(--state-a)}
+  .account .note.bad{color:var(--state-b)}
+  .account .aside{color:var(--ink-soft);font-size:.85rem;line-height:1.55;margin:20px 0 0;text-align:center}
+  .account .stat-row{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);
+    border:1px solid var(--line);border-radius:7px;overflow:hidden;margin:0 0 24px}
+  .account .stat{background:var(--surface);padding:16px 10px;text-align:center}
+  .account .stat b{display:block;font-family:var(--font-display);font-size:1.7rem;line-height:1;
+    font-variant-numeric:tabular-nums;color:var(--accent)}
+  .account .stat span{display:block;margin-top:5px;font-size:.78rem;letter-spacing:.06em;
+    text-transform:uppercase;color:var(--ink-soft)}
+  @media (max-width:430px){
+    .account .field-row{grid-template-columns:1fr;gap:5px}
+    .account .field-row label{padding-top:0}
+  }
+</style>
+</head>
+<body class="skin-gallery">
+<div class="wrap">
+  <div class="page-head">
+    <a class="back" id="back" href="./">← Back to the game</a>
+  </div>
+
+  <div class="account">
+  <svg class="mark" viewBox="0 0 32 32" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+    <rect width="32" height="32" rx="6" fill="var(--surface-alt)" stroke="var(--line)"/>
+    <circle cx="11" cy="12" r="5" fill="var(--state-a)"/><circle cx="21" cy="12" r="5" fill="var(--state-a)"/>
+    <circle cx="11" cy="22" r="5" fill="var(--state-b)"/><circle cx="21" cy="22" r="5" fill="var(--state-a)"/>
+  </svg>
+  <main class="account" id="account-main"></main>
+  </div>
+
+  <div class="page-foot">
+    <a href="./">Play</a>
+    <a href="how.html">How it was built</a>
+    <a href="tech.html">Architecture</a>
+    <a href="legal.html#privacy">Privacy</a>
+    <a href="legal.html#terms">Terms</a>
+  </div>
+</div>
+<script type="module">
+/*HOW*/
+</script>
+</body>
+</html>

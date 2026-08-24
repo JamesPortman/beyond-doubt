@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beyond Doubt — architecture</title>
+  <meta name="description" content="How Beyond Doubt is put together: five layers, a bitmask board, a solver that enumerates worlds, and one set of rules on both sides of the wire.">
+  <meta name="theme-color" content="#f0e7d4">
+  <meta property="og:title" content="Beyond Doubt — architecture">
+  <meta property="og:description" content="Six thousand lines of TypeScript, no runtime dependency in the engine, and one rule that decides most of the structure.">
+  <meta property="og:type" content="article">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23f0e7d4'/%3E%3Ccircle cx='11' cy='12' r='5' fill='%233f7a4f'/%3E%3Ccircle cx='21' cy='12' r='5' fill='%233f7a4f'/%3E%3Ccircle cx='11' cy='22' r='5' fill='%23d2601a'/%3E%3Ccircle cx='21' cy='22' r='5' fill='%233f7a4f'/%3E%3C/svg%3E">
+<!--STYLE-->
+<style>
+  /* The article is the whole page here, so it starts at the top rather than below a
+     board — and the rule that separated it from the game is gone with the game. */
+  .how{margin-top:0;padding-top:0;border-top:0}
+  .page-head{max-width:42rem;margin:0 auto;display:flex;align-items:center;
+    justify-content:space-between;gap:16px;padding:22px 0 30px}
+  .page-head a.back{color:var(--ink-soft);text-decoration:none;font-size:.9rem;
+    border-bottom:1px solid var(--line);padding-bottom:2px}
+  .page-head a.back:hover{color:var(--accent);border-bottom-color:var(--accent)}
+  .page-foot{max-width:42rem;margin:56px auto 0;padding-top:26px;border-top:1px solid var(--line);
+    display:flex;gap:18px;flex-wrap:wrap;font-size:.86rem}
+  .page-foot a{color:var(--ink-soft);text-decoration:none;border-bottom:1px solid var(--line);padding-bottom:2px}
+  .page-foot a:hover{color:var(--accent);border-bottom-color:var(--accent)}
+
+  /* The layer diagram and the route table are the only two things this page needs that
+     the game's stylesheet does not already carry. */
+  .diagram{margin:26px 0 30px}
+  .diagram svg{width:100%;height:auto;display:block}
+  .diagram .lay{fill:var(--surface-alt);stroke:var(--line)}
+  .diagram .lay.core{fill:var(--accent);stroke:var(--accent)}
+  .diagram .lab{fill:var(--ink);font-weight:700;letter-spacing:.02em}
+  .diagram .det{fill:var(--ink-soft);font-size:11.5px;font-family:var(--font-body)}
+  .diagram .core-ink{fill:var(--bg)}
+  .tech table.routes{width:100%;border-collapse:collapse;margin:22px 0 24px;font-size:.9rem}
+  .tech table.routes th{text-align:left;font-family:var(--font-display);font-size:.7rem;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--accent);padding:0 12px 8px 0;
+    border-bottom:1px solid var(--line)}
+  .tech table.routes td{padding:9px 12px 9px 0;border-bottom:1px solid var(--line);
+    vertical-align:top;line-height:1.45}
+  .tech table.routes td:first-child{font-family:var(--font-mono);font-size:.84rem;
+    color:var(--ink);white-space:nowrap}
+  .tech table.routes td:last-child{color:var(--ink-soft)}
+  .tech code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);
+    border:1px solid var(--line);border-radius:3px;padding:1px 5px}
+  /* a table cannot be allowed to push the page sideways on a phone */
+  .tech .table-wrap{overflow-x:auto}
+</style>
+</head>
+<body class="skin-gallery">
+<div class="wrap">
+  <div class="page-head">
+    <a class="back" id="back" href="./">← Back to the game</a>
+  </div>
+
+  <article class="how tech" id="tech">
+<!--ARTICLE-->
+  </article>
+
+  <div class="page-foot">
+    <a href="./">Play</a>
+    <a href="how.html">How it was built</a>
+    <a href="legal.html#privacy">Privacy</a>
+  </div>
+</div>
+<script type="module">
+/*HOW*/
+</script>
+</body>
+</html>

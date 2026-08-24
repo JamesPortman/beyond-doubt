@@ -384,64 +384,19 @@ class App {
         : `${st.current}-day streak · best ${st.best}`;
       wrap.appendChild(chip);
     }
+    // Signing in, signing out and leaving all live on their own page: a modal cannot be
+    // linked to, does not survive a reload mid-code, and is a poor place to keep the exit.
+    const link = document.createElement('a');
+    link.className = 'link';
+    link.href = 'account.html';
     if (this.online && this.api.user) {
       wrap.appendChild(el('span', 'who', this.api.user.displayName));
-      const out = el('button', 'link', 'Sign out');
-      out.onclick = () => { this.api.signOut(); this.online = false; this.buildChrome(); void this.newBoard(); };
-      wrap.appendChild(out);
+      link.textContent = 'Account';
     } else {
       wrap.appendChild(el('span', 'who', 'Local play'));
-      const inb = el('button', 'link', 'Sign in');
-      inb.onclick = () => this.signInFlow();
-      wrap.appendChild(inb);
+      link.textContent = 'Sign in';
     }
-  }
-
-  signInFlow() {
-    const ov = $('#overlay');
-    ov.innerHTML = '';
-    const card = el('div', 'result signin');
-    card.appendChild(el('h2', '', 'Sign in'));
-    card.appendChild(el('p', 'big', 'Ranked scores need an account. Everything else works without one.'));
-    const email = document.createElement('input');
-    email.type = 'email'; email.placeholder = 'you@example.com'; email.className = 'field';
-    const name = document.createElement('input');
-    name.type = 'text'; name.placeholder = 'Display name'; name.className = 'field';
-    const code = document.createElement('input');
-    code.type = 'text'; code.placeholder = '6-digit code'; code.className = 'field'; code.style.display = 'none';
-    const note = el('p', 'streak', '');
-    const go = el('button', 'primary', 'Send code');
-    const cancel = el('button', '', 'Cancel');
-    let stage: 'email' | 'code' = 'email';
-
-    go.onclick = async () => {
-      try {
-        if (stage === 'email') {
-          const r = await this.api.requestCode(email.value.trim());
-          stage = 'code';
-          code.style.display = '';
-          go.textContent = 'Verify';
-          note.textContent = r.devCode ? `Dev mode — your code is ${r.devCode}` : 'Check your email.';
-          if (r.devCode) code.value = r.devCode;
-        } else {
-          await this.api.verify(email.value.trim(), code.value.trim(), name.value.trim() || undefined);
-          this.online = true;
-          ov.classList.remove('on');
-          this.buildChrome();
-          await this.newBoard();
-        }
-      } catch (e) {
-        const code = (e as ApiError).code;
-        note.textContent = code === 'too-many-requests'
-          ? 'Too many sign-in attempts. Try again in a few minutes.'
-          : `Could not sign in (${code ?? 'no server'}). Start it with: npm run serve`;
-      }
-    };
-    cancel.onclick = () => ov.classList.remove('on');
-    for (const n of [email, name, code, note, go, cancel]) card.appendChild(n);
-    ov.appendChild(card);
-    ov.classList.add('on');
-    email.focus();
+    wrap.appendChild(link);
   }
 
   replayNotice(r: RunResult) {
@@ -1592,34 +1547,13 @@ class App {
 
     card.appendChild(rows);
 
-    // Your data. Signed in only — there is nothing on our side to export or erase until
-    // there is an account, and the local board is cleared by clearing site data.
-    if (this.online && this.api.user) {
-      card.appendChild(el('h3', 'setting-head', 'Your data'));
-      const note = el('p', 'streak', '');
-      const exp = el('button', '', 'Download my data');
-      exp.onclick = async () => {
-        try {
-          const dump = await this.api.exportAccount();
-          const url = URL.createObjectURL(new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' }));
-          const a = document.createElement('a');
-          a.href = url; a.download = `beyond-doubt-${dump.account.id}.json`; a.click();
-          setTimeout(() => URL.revokeObjectURL(url), 5000);
-          note.textContent = 'Downloaded.';
-        } catch (e) { note.textContent = `Could not export (${(e as ApiError).code ?? 'no server'}).`; }
-      };
-      const del = el('button', 'danger', 'Delete my account');
-      del.onclick = () => { ov.classList.remove('on'); this.deleteAccountFlow(); };
-      card.appendChild(exp);
-      card.appendChild(del);
-      card.appendChild(note);
-    }
-
     const legal = el('p', 'streak legal-links');
-    for (const [label, id] of [['Privacy', '#privacy'], ['Terms', '#terms']] as const) {
+    for (const [label, href] of [
+      ['Your account', 'account.html'], ['Privacy', 'legal.html#privacy'],
+      ['Terms', 'legal.html#terms'], ['How it was built', 'how.html'], ['Architecture', 'tech.html'],
+    ] as const) {
       const a = document.createElement('a');
-      a.href = id; a.textContent = label;
-      a.onclick = () => { ov.classList.remove('on'); };
+      a.href = href; a.textContent = label;
       legal.appendChild(a);
     }
     card.appendChild(legal);
@@ -1630,55 +1564,6 @@ class App {
     reset.onclick = () => { this.settings = { ...DEFAULT_SETTINGS }; this.commitSettings(); this.openSettings(); };
     card.appendChild(done);
     card.appendChild(reset);
-    ov.appendChild(card);
-    ov.classList.add('on');
-  }
-
-  /** Two gates, deliberately: a code that proves the address is still theirs, and a word
-   *  typed out in full. Neither is friction for someone who means it. */
-  deleteAccountFlow() {
-    const ov = $('#overlay');
-    ov.innerHTML = '';
-    const card = el('div', 'result signin');
-    card.appendChild(el('h2', '', 'Delete your account'));
-    card.appendChild(el('p', 'big',
-      'This erases your account, every run you have recorded and your place on every leaderboard. It cannot be undone.'));
-    const note = el('p', 'streak', 'We will email a code to confirm it is you.');
-    const code = document.createElement('input');
-    code.type = 'text'; code.placeholder = '6-digit code'; code.className = 'field'; code.style.display = 'none';
-    const word = document.createElement('input');
-    word.type = 'text'; word.placeholder = 'Type DELETE'; word.className = 'field'; word.style.display = 'none';
-    const go = el('button', 'danger', 'Send code');
-    const cancel = el('button', 'primary', 'Keep my account');
-    let stage: 'send' | 'confirm' = 'send';
-
-    go.onclick = async () => {
-      try {
-        if (stage === 'send') {
-          const r = await this.api.requestCode(this.api.user!.email);
-          stage = 'confirm';
-          code.style.display = ''; word.style.display = '';
-          go.textContent = 'Delete permanently';
-          note.textContent = r.devCode ? `Dev mode — your code is ${r.devCode}` : 'Check your email for the code.';
-          if (r.devCode) code.value = r.devCode;
-        } else {
-          if (word.value.trim().toUpperCase() !== 'DELETE') { note.textContent = 'Type DELETE to confirm.'; return; }
-          await this.api.deleteAccount(code.value.trim());
-          this.api.signOut();
-          this.online = false;
-          ov.classList.remove('on');
-          this.buildChrome();
-          await this.newBoard();
-          this.toast('Your account has been deleted.', 'good');
-        }
-      } catch (e) {
-        const c = (e as ApiError).code;
-        note.textContent = c === 'too-many-requests' ? 'Too many attempts. Try again in a few minutes.'
-          : c === 'bad-code' ? 'That code did not match.' : `Could not delete (${c ?? 'no server'}).`;
-      }
-    };
-    cancel.onclick = () => ov.classList.remove('on');
-    for (const n of [note, code, word, go, cancel]) card.appendChild(n);
     ov.appendChild(card);
     ov.classList.add('on');
   }

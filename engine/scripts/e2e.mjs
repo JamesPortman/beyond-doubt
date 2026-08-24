@@ -164,13 +164,23 @@ await check('the board can be solved to the end and shows a result with a share 
     'the result card has no share grid');
 });
 
-await check('the footer offers the privacy policy and the terms, and both are on the page', async () => {
+await check('the privacy policy and the terms are one click from the game, and both say something', async () => {
   const links = await page.$$eval('.site-foot a', (n) => n.map((a) => a.getAttribute('href')));
-  assert.ok(links.includes('#privacy') && links.includes('#terms'), `footer links were ${links}`);
+  assert.ok(links.includes('legal.html#privacy') && links.includes('legal.html#terms'),
+    `footer links were ${links}`);
+  // the result card from the solved board is still up, and it covers the footer
+  await page.evaluate(() => document.getElementById('overlay')?.classList.remove('on'));
+  await page.click('.site-foot a[href="legal.html#privacy"]');
+  await page.waitForSelector('#privacy', { timeout: 10000 });
   for (const id of ['privacy', 'terms']) {
     const words = await page.$eval(`#${id}`, (n) => (n.textContent ?? '').trim().split(/\s+/).length);
     assert.ok(words > 150, `#${id} has only ${words} words`);
   }
+  // the page has to carry the game's palette, or it reads as somebody else's site
+  const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  assert.match(bg, /^#[0-9a-f]{6}$/i, `the theme palette did not apply (--bg was "${bg}")`);
+  await page.goto(base);
+  await page.waitForSelector('.cell', { timeout: 15000 });
 });
 
 await check('the article is its own page, reachable from the game, in all three languages', async () => {
@@ -208,6 +218,23 @@ await check('the article is its own page, reachable from the game, in all three 
   assert.equal(await page.$eval('#lang', (n) => n.value), 'en', 'the game and the article disagree about the language');
 });
 
+await check('the architecture page is reachable, complete, and does not scroll sideways', async () => {
+  await page.evaluate(() => document.getElementById('overlay')?.classList.remove('on'));
+  await page.click('.site-foot a[href="tech.html"]');
+  await page.waitForSelector('#tech', { timeout: 10000 });
+  const words = await page.$eval('#tech', (n) => (n.textContent ?? '').trim().split(/\s+/).length);
+  assert.ok(words > 900, `the architecture page has only ${words} words`);
+  assert.ok(await page.$$eval('.diagram svg', (n) => n.length) === 1, 'the layer diagram is missing');
+  assert.ok(await page.$$eval('table.routes tr', (n) => n.length) > 5, 'the route table is missing');
+  // a wide table must scroll inside itself, never take the page with it
+  const wide = await page.evaluate(() => document.body.scrollWidth > window.innerWidth + 1);
+  assert.equal(wide, false, 'the page scrolls horizontally on a phone-width viewport');
+  const bg = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--bg').trim());
+  assert.match(bg, /^#[0-9a-f]{6}$/i, `the theme palette did not apply (--bg was "${bg}")`);
+  await page.goto(base);
+  await page.waitForSelector('.cell', { timeout: 15000 });
+});
+
 await check('the admin surface is not reachable without the token', async () => {
   const status = await page.evaluate(async (b) => (await fetch(`${b}api/admin/flags`, { method: 'POST', body: '{}' })).status, base);
   assert.equal(status, 403, `expected a refusal, got ${status}`);
@@ -219,21 +246,33 @@ await check('the player-facing flags never carry operator-only fields', async ()
   assert.equal('signups' in flags.flags, false, 'signups leaked into the public flags');
 });
 
-await check('a player can sign in, and their data comes back to them on request', async () => {
+await check('a player can sign in on the account page and the game notices', async () => {
   await page.reload();
   await page.waitForSelector('.cell', { timeout: 15000 });
-  await page.click('#account button.link');            // "Sign in"
-  await page.waitForSelector('.signin .field');
-  await page.fill('.signin input[type=email]', 'e2e@example.com');
-  await page.fill('.signin input[type=text]', 'E2E Player');
-  await page.click('.signin .primary');                 // send code — dev mode fills it in
-  // Wait for the code field to appear rather than a fixed pause: `.who` already exists
-  // in local mode, so waiting on the selector races against the text changing.
-  await page.waitForSelector('.signin input[placeholder="6-digit code"]:visible', { timeout: 10000 });
-  await page.click('.signin .primary');                 // verify
+  await page.evaluate(() => document.getElementById('overlay')?.classList.remove('on'));
+  await page.click('#account a.link');                  // "Sign in"
+  await page.waitForSelector('#email', { timeout: 10000 });
+  assert.equal(await page.$$eval('#code', (n) => n.filter((x) => x.offsetParent !== null).length), 0,
+    'the code field should not be shown before a code has been sent');
+
+  await page.fill('#email', 'e2e@example.com');
+  await page.click('.account .primary');
+  // dev mode fills the code in; waiting for it to appear beats a fixed pause
+  await page.waitForFunction(() => document.querySelector('#code')?.offsetParent !== null, null, { timeout: 10000 });
+  await page.fill('#name', 'E2E Player');
+  await page.click('.account .primary');
+  await page.waitForFunction(() => /Hello/.test(document.querySelector('.welcome')?.textContent ?? ''),
+    null, { timeout: 10000 });
+  assert.match(await page.$eval('.welcome', (n) => n.textContent), /E2E Player/);
+  assert.ok(await page.$$eval('.stat b', (n) => n.length) === 3, 'the streak figures are missing');
+
+  await page.click('#back');
+  await page.waitForSelector('.cell', { timeout: 15000 });
   await page.waitForFunction(
     () => document.querySelector('#account .who')?.textContent === 'E2E Player', null, { timeout: 10000 });
+});
 
+await check('the export hands back the rows and no secrets', async () => {
   const dump = await page.evaluate(async () => {
     const token = localStorage.getItem('clues.token');
     const r = await fetch('/api/account/export', {

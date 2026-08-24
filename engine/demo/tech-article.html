@@ -1,0 +1,158 @@
+    <p class="eyebrow">Beyond Doubt</p>
+    <h2>Architecture</h2>
+    <p class="standfirst">Six thousand lines of TypeScript, no runtime dependency in the
+    engine, and one rule that decides most of the structure: the thing that says a move is
+    legal must be the same thing on both sides of the wire.</p>
+
+    <h3>Five layers, and which way they point</h3>
+    <p class="sub">Dependencies only ever point inward</p>
+    <div class="diagram" role="img" aria-label="Five layers: interface and network depend on themes and language, which depend on the core; the core depends on nothing.">
+      <svg viewBox="0 0 640 250" xmlns="http://www.w3.org/2000/svg">
+        <g font-family="var(--font-display)" font-size="13">
+          <rect class="lay outer" x="8" y="8" width="624" height="52" rx="5"/>
+          <text class="lab" x="24" y="30">Interface</text>
+          <text class="det" x="24" y="48">demo/app.ts — board, sheets, settings, the article and legal pages</text>
+
+          <rect class="lay outer" x="8" y="68" width="624" height="52" rx="5"/>
+          <text class="lab" x="24" y="90">Network</text>
+          <text class="det" x="24" y="108">server · store · store-pg · protocol · client · flags</text>
+
+          <rect class="lay mid" x="8" y="128" width="306" height="52" rx="5"/>
+          <text class="lab" x="24" y="150">Themes</text>
+          <text class="det" x="24" y="168">seven data files, one drawing function each</text>
+
+          <rect class="lay mid" x="326" y="128" width="306" height="52" rx="5"/>
+          <text class="lab" x="342" y="150">Language</text>
+          <text class="det" x="342" y="168">en · pt · es, plus the agreement rules</text>
+
+          <rect class="lay core" x="8" y="188" width="624" height="54" rx="5"/>
+          <text class="lab core-ink" x="24" y="210">Core</text>
+          <text class="det core-ink" x="24" y="228">grid · clue · solver · generate · session · edition · scoring · streak · share</text>
+        </g>
+      </svg>
+    </div>
+    <p>The core knows nothing about paintings, guests, Portuguese or HTTP. It is pure
+    functions over integers, which is why the same file decides a move in the browser and
+    decides it again on the server. There is no second implementation of the rules to keep
+    in sync, and no way for the two to drift apart under a deadline.</p>
+
+    <h3>A board is an integer, a clue is a predicate</h3>
+    <p class="sub">core/grid.ts · core/clue.ts · core/solver.ts</p>
+    <p>Up to twenty squares, two states each, one bit per square: the whole board is a
+    32-bit integer. A grid precomputes the masks that clues talk about — each row, each
+    column, the corners, the edges, the interior, the neighbours of every square, the
+    squares between any two.</p>
+    <p>There are nine kinds of clue and eleven ways to select squares, and every clue
+    compiles to a closure with one method: <em>given this world, are you satisfied?</em>
+    Counting clues become two or three bit operations. Each compiled clue also carries a
+    cost, so the solver runs the cheap tests first and the expensive one — is this set of
+    squares connected? — only sees candidates that already survived everything else.</p>
+    <div class="pull">
+      <span class="lab">The whole solver</span>
+      <p>Enumerate every world still consistent with what the player knows, then see which
+      squares agree across all of them. Squares that agree are <em>forced</em>; the player
+      may flip those and nothing else. That one rule is the no-guess guarantee, and it is
+      also what makes the game safe to race — nobody can gamble ahead.</p>
+    </div>
+    <p>Enumeration walks the submasks of the unknown squares, which is why the board is
+    capped at twenty-one free squares: beyond that the walk stops being instant. The limit
+    is enforced rather than assumed — the solver throws instead of quietly getting slow.</p>
+
+    <h3>Boards are built backwards</h3>
+    <p class="sub">core/generate.ts</p>
+    <p>The solution is drawn first, and the generator only ever considers clues that are
+    true of it. From that pool it assembles a chain — an opening fact, a clue that forces a
+    square, the clue that square was holding, onward until the board is fully determined.
+    Each clue records its <em>gate</em>: the square whose reveal hands it to the player. An
+    opening clue has no gate. If the chain cannot be completed the board is discarded and
+    another is drawn, so nothing ships that the machine has not solved first.</p>
+
+    <h3>What crosses the wire</h3>
+    <p class="sub">net/protocol.ts · net/client.ts · net/server.ts</p>
+    <p>The client is sent a grid, the tags on each square, a label seed, and the opening
+    clues. Not the solution, not the forced path, not the board's seed. It deduces locally
+    and answers instantly; the server independently re-derives the same deduction and
+    records it. The client sends a <em>mode</em>, never a date or a seed, so it cannot ask
+    for tomorrow's board or one it has already solved offline.</p>
+    <div class="table-wrap">
+    <table class="routes">
+      <thead><tr><th>Route</th><th>What it decides</th></tr></thead>
+      <tbody>
+        <tr><td>/api/today</td><td>which boards exist right now, in the game's timezone</td></tr>
+        <tr><td>/api/play/start</td><td>resolves a mode to an edition; returns a view with no answer in it</td></tr>
+        <tr><td>/api/play/move</td><td>the only place a square is ever decided; returns unlocked clues</td></tr>
+        <tr><td>/api/play/hint</td><td>clue first, square second — the ladder is server-side</td></tr>
+        <tr><td>/api/auth/request · verify</td><td>emailed code, single use, ten minutes, rate limited both ways</td></tr>
+        <tr><td>/api/account/export · delete</td><td>the copy you are owed, and the exit</td></tr>
+        <tr><td>/api/admin/flags · flags/set</td><td>404 unless an operator token exists</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p>Eighteen routes in total, all of them POST-with-JSON except the handful that are
+    genuinely reads. One file answers all of them, and the same file is what
+    <code>npm run serve</code> runs locally.</p>
+
+    <h3>Two databases, one interface, one test suite</h3>
+    <p class="sub">net/store.ts · net/store-pg.ts</p>
+    <p>Nine tables: accounts, sign-in codes, sessions, plays, results, rooms, room members,
+    operator settings, rate-limit hits. The <code>Store</code> interface is roughly thirty
+    methods; SQLite implements it for local work and Postgres for production, and the
+    entire server suite runs against both — each Postgres run in its own schema, so the
+    tests can be run concurrently without colliding.</p>
+    <p>That is not belt and braces. The two disagree in small, expensive ways: one query
+    that passed happily on SQLite failed on Postgres because a column that is a boolean in
+    one is an integer in the other, and nine tests went red the moment they met the real
+    database.</p>
+
+    <h3>Time, and who owns it</h3>
+    <p class="sub">core/edition.ts</p>
+    <p>Every board is a pure function of its date and theme, so two people opening the same
+    day's puzzle on opposite sides of the world generate the identical board independently,
+    with nothing passed between them. The archive can therefore serve the board that
+    actually ran on a past day without having stored it.</p>
+    <p>"Which day is it" belongs to the server, and it is a <em>civil</em> date in the
+    game's own timezone rather than a UTC one — a daily that rolls over in UTC arrives at
+    eight in the evening for anyone in Eastern time. Civil-day arithmetic anchors at noon
+    UTC and steps in UTC, because subtracting twenty-four hours from an instant lands in
+    the same civil day twice on the two days a year the clocks move.</p>
+
+    <h3>Switches, enforced where they matter</h3>
+    <p class="sub">net/flags.ts</p>
+    <p>Puzzles, the archive, the weekly edition, free play, rooms, new accounts and a
+    notice line can each be switched off without a deploy. Every one of them is checked on
+    the server, in the routes themselves, rather than by hiding a button — a flag that only
+    greys out a control is decoration, because anyone can still call the API. The tests
+    assert the refusal, not the hidden button.</p>
+
+    <h3>How it is deployed</h3>
+    <p class="sub">One function, one bucket, two suppliers</p>
+    <p>The build produces static pages — the game, this page, the article, the policies —
+    and a single serverless function that answers every <code>/api/*</code> route by
+    constructing the same server object the local command does. Postgres is hosted at Neon,
+    sign-in codes are delivered by Resend. Connection pools are deliberately small, because
+    a serverless platform runs many instances and a hosted database has a connection
+    ceiling.</p>
+
+    <h3>The shape, in numbers</h3>
+    <p class="sub">Lines of TypeScript</p>
+    <div class="figures">
+      <div class="fig"><b>1,458</b><span>core: rules and solver</span></div>
+      <div class="fig"><b>1,908</b><span>server, stores, protocol</span></div>
+      <div class="fig"><b>1,072</b><span>three languages</span></div>
+      <div class="fig"><b>1,647</b><span>tests</span></div>
+    </div>
+    <p>Themes are 806 lines for all seven together — the point of the skin layer is that
+    the seventh costs about as much as the second. The engine has no runtime dependencies
+    at all; the server has exactly one, a Postgres driver.</p>
+
+    <h3>Limits worth knowing</h3>
+    <p class="sub">The honest list</p>
+    <p>Twenty-one free squares is a hard ceiling, not a tuning knob — a larger board needs
+    a different solver, not a bigger constant. Rate limiting is deliberately approximate:
+    two requests racing can both squeak through, which for a speed bump on a sign-in form
+    is a fair trade against locking a table on every hit. And the no-guess guarantee is
+    expensive by construction: it is paid for on every single tap, which is exactly why the
+    board is small enough that paying it is free.</p>
+
+    <p class="colophon">Written alongside the code rather than after it. If this page and
+    the source disagree, the source is right and this page is a bug.</p>
