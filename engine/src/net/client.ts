@@ -1,4 +1,7 @@
 import * as P from './protocol.js';
+import { basePath } from '../base.js';
+
+export { basePath };
 
 /** Thin typed wrapper. Note what it cannot do: submit a score, submit a time, or ask for
  *  a specific seed. Those are server concerns and there is no method for them. */
@@ -95,13 +98,6 @@ export class Api {
 
 export class ApiError extends Error {
   constructor(public code: string, public status: number) { super(code); }
-}
-
-/** The path prefix the app is served under: empty at a domain root, and "/beyond-doubt"
- *  when www.portman.ca proxies it as a subpath. Read from the URL rather than baked in,
- *  so one deployment answers on both without a build flag. */
-export function basePath(pathname: string): string {
-  return /^\/beyond-doubt(\/|$)/.test(pathname) ? '/beyond-doubt' : '';
 }
 
 export function defaultApiBase(): string {
