@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { basePath } from '../src/net/client.js';
+import { basePath, currentBase } from '../src/base.js';
+import { gallery } from '../src/themes/gallery.js';
 
 // The demo answers on two URLs: its own Vercel domain at the root, and
 // www.portman.ca/beyond-doubt/, which proxies it as a subpath. Every /api call is
@@ -21,4 +22,36 @@ test('basePath recovers the /beyond-doubt prefix, and only that prefix', () => {
 
   // The prefix is only ever the leading segment.
   assert.equal(basePath('/other/beyond-doubt/x'), '');
+});
+
+// The tile artwork is fetched by path like the API is, so it needs the same prefix.
+// A bare /assets/... resolves against the proxying site's own root, where portman.ca
+// has an /assets directory of its own — which is how the board rendered blank tiles.
+test('gallery artwork is addressed relative to the deployment, not the host root', () => {
+  const loc = globalThis.location;
+  try {
+    Object.defineProperty(globalThis, 'location', {
+      value: { pathname: '/beyond-doubt/' }, configurable: true, writable: true,
+    });
+    assert.equal(currentBase(), '/beyond-doubt');
+    assert.equal(gallery.images?.src(0), '/beyond-doubt/assets/gallery/01.webp');
+
+    (globalThis as { location?: unknown }).location = { pathname: '/' };
+    assert.equal(currentBase(), '');
+    assert.equal(gallery.images?.src(0), '/assets/gallery/01.webp');
+  } finally {
+    if (loc) Object.defineProperty(globalThis, 'location', { value: loc, configurable: true, writable: true });
+    else delete (globalThis as { location?: unknown }).location;
+  }
+});
+
+// Off-browser (server render, tests) there is no location and no prefix to add.
+test('currentBase is empty when there is no location', () => {
+  const loc = globalThis.location;
+  try {
+    delete (globalThis as { location?: unknown }).location;
+    assert.equal(currentBase(), '');
+  } finally {
+    if (loc) Object.defineProperty(globalThis, 'location', { value: loc, configurable: true, writable: true });
+  }
 });

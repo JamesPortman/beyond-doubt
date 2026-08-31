@@ -1,4 +1,5 @@
 import { Theme } from './index.js';
+import { currentBase } from '../base.js';
 import { noun, pred, predInv } from '../i18n/index.js';
 
 /** The twenty-one works in the set, in filename order.
@@ -40,7 +41,9 @@ export const gallery: Theme = {
   skinClass: 'skin-gallery',
   images: {
     count: WORKS.length,
-    src: (n) => `/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
+    // currentBase() keeps the artwork reachable when the app is proxied at a subpath;
+    // a bare /assets/... would resolve against the proxying site's own root.
+    src: (n) => `${currentBase()}/assets/gallery/${String(n + 1).padStart(2, '0')}.webp`,
     title: (n) => WORKS[n].title,
     credit: (n) => {
       const w = WORKS[n];
