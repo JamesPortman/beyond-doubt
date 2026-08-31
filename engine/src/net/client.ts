@@ -97,8 +97,15 @@ export class ApiError extends Error {
   constructor(public code: string, public status: number) { super(code); }
 }
 
+/** The path prefix the app is served under: empty at a domain root, and "/beyond-doubt"
+ *  when www.portman.ca proxies it as a subpath. Read from the URL rather than baked in,
+ *  so one deployment answers on both without a build flag. */
+export function basePath(pathname: string): string {
+  return /^\/beyond-doubt(\/|$)/.test(pathname) ? '/beyond-doubt' : '';
+}
+
 export function defaultApiBase(): string {
   const loc = globalThis.location;
-  if (loc && /^https?:$/.test(loc.protocol)) return loc.origin;
+  if (loc && /^https?:$/.test(loc.protocol)) return loc.origin + basePath(loc.pathname);
   return 'http://localhost:8787';
 }

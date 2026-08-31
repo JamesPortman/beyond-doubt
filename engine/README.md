@@ -373,6 +373,16 @@ than patched on:
 - **Rate limiting reads the database**, not a `Map`. That was a real change made for this —
   an in-process counter is worthless when the next request may hit a different process.
 
+### Served under a path prefix
+
+The Vercel deployment answers on two URLs: its own domain at the root, and
+`www.portman.ca/beyond-doubt/`, which proxies it as a subpath. `defaultApiBase()` in
+`src/net/client.ts` recovers the prefix from `location.pathname` and prepends it to the
+API origin, so one build serves both with no environment flag. The demo pages already
+link to each other relatively, so nothing else needed changing; keep it that way when
+adding a page. `test/client-base.test.ts` pins the prefix rules, including that a path
+merely *starting* with the same letters is a different app.
+
 What you still have to do:
 
 1. **Provision Postgres** (Vercel Postgres, Neon, Supabase — any of them). SQLite on Vercel
