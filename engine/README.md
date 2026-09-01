@@ -9,7 +9,8 @@ illustration function.
 
 ```
 npm install
-npm run verify      # types, 46 tests, 294-board fuzz, then builds the demo
+npm run verify      # types, 82 tests, 294-board fuzz, demo build, then e2e
+                    # (e2e needs Playwright — see End-to-end checks below)
 npm run serve       # http://localhost:8787  — accounts + ranked play
 ```
 
