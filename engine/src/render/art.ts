@@ -446,19 +446,73 @@ function dossier(rng: Rng, o: ArtOptions): string {
 
 /* ------------------------------------------------------------------ */
 
+/** Stars are not one colour. A real field runs from hot blue-white through white and
+ *  yellow to orange and red, and it is that spread — not the dot placement — that makes
+ *  a plate read as a sky rather than as speckle. Ordered hot to cool. */
+const STAR_TEMPS = ['#a9c6ff', '#cddcff', '#f2f4ff', '#fff6e0', '#ffe2ad', '#ffbe7d', '#ff9166'];
+
+/** Each band photographs a different part of the spectrum, so it changes both which stars
+ *  register and what the plate is toned in. `shift` moves the temperature distribution
+ *  (negative = hotter), `tone` washes the plate. Redundant with the band already printed
+ *  in the tile caption, so this is reinforcement and never the only cue — which is what
+ *  keeps it honest in colour-blind mode. */
+const BANDS: Record<string, { shift: number; tone: string }> = {
+  blue: { shift: -1.7, tone: '#5d8ed6' },
+  visual: { shift: 0, tone: '#cfd6e2' },
+  red: { shift: 1.5, tone: '#d4703c' },
+  infrared: { shift: 2.6, tone: '#b0402c' },
+};
+
 function starfield(rng: Rng, o: ArtOptions): string {
   const p = o.theme.palette;
   const id = `s${o.index}`;
   const source = o.state === 1;
+  const band = BANDS[o.tag ?? ''] ?? BANDS.visual;
   const nx = 20 + rng.next() * 60, ny = 20 + rng.next() * 60;
 
-  const stars = Array.from({ length: 34 }, () => {
-    const r = 0.35 + rng.next() * 1.5;
+  // Averaging two draws clusters the pick mid-range, so most stars are ordinary and the
+  // extremes stay rare; the band then slides the whole distribution hot or cool.
+  const temp = () => {
+    const t = ((rng.next() + rng.next()) / 2) * (STAR_TEMPS.length - 1) + band.shift;
+    return STAR_TEMPS[Math.max(0, Math.min(STAR_TEMPS.length - 1, Math.round(t)))];
+  };
+
+  // Density varies field to field, so plates differ in character and not only in where
+  // the dots fell.
+  const count = 24 + rng.int(26);
+
+  const stars = Array.from({ length: count }, () => {
+    const r = 0.35 + rng.next() * 1.6;
     const x = rng.next() * 100, y = rng.next() * 100;
-    const bright = r > 1.5;
-    return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}" fill="${p.ink}" opacity="${(0.2 + rng.next() * 0.7).toFixed(2)}"/>`
-      + (bright ? `<path d="M${(x - r * 3).toFixed(1)} ${y.toFixed(1)}h${(r * 6).toFixed(1)}M${x.toFixed(1)} ${(y - r * 3).toFixed(1)}v${(r * 6).toFixed(1)}" stroke="${p.ink}" stroke-width="0.35" opacity=".45"/>` : '');
+    const c = temp();
+    const bright = r > 1.45;
+    const halo = bright
+      ? `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(r * 2.6).toFixed(2)}" fill="${c}" opacity=".13"/>`
+      : '';
+    const spikes = bright
+      ? `<path d="M${(x - r * 3).toFixed(1)} ${y.toFixed(1)}h${(r * 6).toFixed(1)}M${x.toFixed(1)} ${(y - r * 3).toFixed(1)}v${(r * 6).toFixed(1)}" stroke="${c}" stroke-width="0.35" opacity=".5"/>`
+      : '';
+    return halo
+      + `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${r.toFixed(2)}" fill="${c}" opacity="${(0.35 + rng.next() * 0.6).toFixed(2)}"/>`
+      + spikes;
   }).join('');
+
+  // One deep-sky object on some plates: a nebula smudge or an edge-on galaxy. Structure,
+  // rather than more dots, is what stops the set looking like one picture repeated.
+  const deep = (() => {
+    const roll = rng.next();
+    const dx = 22 + rng.next() * 56, dy = 22 + rng.next() * 56;
+    if (roll < 0.22) {
+      return `<ellipse cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" rx="${(7 + rng.next() * 9).toFixed(1)}" ry="${(3 + rng.next() * 4).toFixed(1)}" `
+        + `transform="rotate(${rng.int(180)} ${dx.toFixed(1)} ${dy.toFixed(1)})" fill="url(#${id}d)"/>`;
+    }
+    if (roll < 0.4) {
+      return `<ellipse cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" rx="${(9 + rng.next() * 7).toFixed(1)}" ry="${(1.1 + rng.next() * 1.2).toFixed(1)}" `
+        + `transform="rotate(${rng.int(180)} ${dx.toFixed(1)} ${dy.toFixed(1)})" fill="${band.tone}" opacity=".3"/>`
+        + `<circle cx="${dx.toFixed(1)}" cy="${dy.toFixed(1)}" r="1.7" fill="${STAR_TEMPS[3]}" opacity=".5"/>`;
+    }
+    return '';
+  })();
 
   const scratch = rng.next() > 0.6
     ? `<path d="M${rng.int(100)} 0 q${rng.int(20) - 10} 50 ${rng.int(16) - 8} 100" stroke="${p.inkSoft}" stroke-width="0.4" fill="none" opacity=".3"/>` : '';
@@ -466,14 +520,18 @@ function starfield(rng: Rng, o: ArtOptions): string {
   return `
     <defs>
       <radialGradient id="${id}n" cx="${(nx / 100).toFixed(2)}" cy="${(ny / 100).toFixed(2)}" r="0.55">
-        <stop offset="0" stop-color="${p.accent}" stop-opacity=".16"/>
-        <stop offset="1" stop-color="${p.accent}" stop-opacity="0"/>
+        <stop offset="0" stop-color="${band.tone}" stop-opacity=".2"/>
+        <stop offset="1" stop-color="${band.tone}" stop-opacity="0"/>
+      </radialGradient>
+      <radialGradient id="${id}d" cx="0.5" cy="0.5" r="0.5">
+        <stop offset="0" stop-color="${band.tone}" stop-opacity=".42"/>
+        <stop offset="1" stop-color="${band.tone}" stop-opacity="0"/>
       </radialGradient>
     </defs>
     <rect width="100" height="100" fill="${p.tile}"/>
     <rect width="100" height="100" fill="url(#${id}n)"/>
     ${[25, 50, 75].map((v) => `<path d="M${v} 0v3M${v} 97v3M0 ${v}h3M97 ${v}h3" stroke="${p.inkSoft}" stroke-width="0.5" opacity=".45"/>`).join('')}
-    ${stars}${scratch}
+    ${deep}${stars}${scratch}
     ${source
       ? `<circle cx="50" cy="50" r="13" fill="${p.accent}" opacity=".12"/>
          <circle cx="50" cy="50" r="9" fill="none" stroke="${p.accent}" stroke-width="1.5"/>
