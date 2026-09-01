@@ -14,7 +14,7 @@
     "fuzz": "tsc -p tsconfig.test.json && node scripts/fuzz.mjs",
     "demo": "tsc -p tsconfig.demo.json && node scripts/build-demo.mjs",
     "serve": "npm run build && npm run demo && node --no-warnings scripts/serve.mjs",
-    "verify": "npm run test && npm run fuzz && npm run demo && node --no-warnings scripts/e2e.mjs",
+    "verify": "npm run test && npm run fuzz && npm run e2e",
     "test:pg": "tsc -p tsconfig.test.json && CLUES_PG=\"${DATABASE_URL:-postgres://postgres:devpw@127.0.0.1:5432/clues}\" node --no-warnings --test \"dist-test/test/server*.js\"",
     "typecheck:demo": "tsc -p tsconfig.demo.json",
     "e2e": "npm run build && npm run demo && node --no-warnings scripts/e2e.mjs"
@@ -23,6 +23,7 @@
     "@types/node": "^22.20.1",
     "@types/pg": "^8.11.0",
     "esbuild": "^0.28.2",
+    "playwright": "^1.56.0",
     "typescript": "5.6"
   },
   "license": "UNLICENSED",
