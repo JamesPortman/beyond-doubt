@@ -242,7 +242,7 @@ class App {
         this.toast(`${(e as ApiError).code ?? 'offline'}`, 'warn');
       }
     }
-    if (!this.playId) this.startLocal(dayIndex);
+    if (!this.playId) this.startLocal();
 
     this.pencils = new Array(this.session.puzzle.n).fill(0);
     this.doneClues.clear();
@@ -255,16 +255,13 @@ class App {
     this.render();
   }
 
-  private startLocal(dayIndex?: number) {
-    const today = new Date();
+  /** Only practice boards are built in the browser. A ranked board's seed is keyed on the
+   *  server (SECRET_SEEDS_FROM) and never sent, and building one here would put its full
+   *  solution in the page, where anyone could lift it into a ranked run. So split play and
+   *  the offline fallback get a practice board, not today's. */
+  private startLocal() {
     let ref: EditionRef;
-    if (this.prefs.mode === 'weekly') {
-      ref = weeklyEdition(THEME_IDS, today, this.prefs.themeId)[Math.min(dayIndex ?? this.todayIndex, this.todayIndex)];
-    } else if (this.prefs.mode === 'archive' && this.archiveDate) {
-      ref = dailyEdition(THEME_IDS, new Date(`${this.archiveDate}T12:00:00Z`), this.prefs.themeId);
-    } else if (this.prefs.mode === 'daily' || this.prefs.mode === 'split') {
-      ref = dailyEdition(THEME_IDS, today, this.prefs.themeId);
-    } else if (this.linked) {
+    if (this.linked) {
       ref = freeEdition(this.prefs.themeId, this.linked.difficulty ?? 4, this.linked.seed!);
       this.linked = null;   // only the first board comes from the link
     } else {

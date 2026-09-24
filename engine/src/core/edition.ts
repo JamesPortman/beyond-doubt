@@ -2,8 +2,13 @@ import { generate, Puzzle } from './generate.js';
 import { Theme } from '../themes/index.js';
 
 /** Editions are pure functions of the calendar. No puzzle data is ever shipped or stored:
- *  two players on opposite sides of the world derive the identical board from the date,
- *  which is what makes a shared leaderboard meaningful. */
+ *  every player gets the identical board for a day, which is what makes a shared
+ *  leaderboard meaningful.
+ *
+ *  The seeds below are the public basis. For ranked boards dated SECRET_SEEDS_FROM or later
+ *  the server replaces them with a keyed seed (net/server.ts), so the calendar alone no
+ *  longer tells you tomorrow's board. The browser builds boards from these only for practice;
+ *  elsewhere it reads just their ids and difficulty, for the week strip and the archive. */
 
 export interface EditionRef {
   /** stable id, e.g. "d:2026-08-20" or "w:2026-W34:3" */

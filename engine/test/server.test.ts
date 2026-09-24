@@ -1,7 +1,7 @@
 import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameServer, bands, isoLaunch } from '../src/net/server.js';
+import { GameServer, bands, isoLaunch, SECRET_SEEDS_FROM } from '../src/net/server.js';
 import { isoDate, civilDate, GAME_TZ, shiftDays } from '../src/core/edition.js';
 import { streakStats } from '../src/core/streak.js';
 import { Session } from '../src/core/session.js';
@@ -356,32 +356,32 @@ test('presence cannot be faked by a client', async () => {
 });
 
 test('the archive lists real past days and refuses invented ones', async () => {
-  const clk = clock('2026-08-20T12:00:00Z');
-  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-08-01' });
+  const clk = clock('2026-10-22T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-10-03' });
   const { token } = await signIn(srv, 'a@b.co');
   const u = () => userOf(srv, token);
 
   const arc = await srv.archive(await u(), { themeId: 'orchard', days: 35 });
-  assert.equal(arc.days[0].date, '2026-08-20', 'newest first');
-  assert.equal(arc.days[arc.days.length - 1].date, '2026-08-01', 'stops at the launch date');
+  assert.equal(arc.days[0].date, '2026-10-22', 'newest first');
+  assert.equal(arc.days[arc.days.length - 1].date, '2026-10-03', 'stops at the launch date');
   assert.equal(arc.days.length, 20);
   assert.equal(arc.completed, 0);
   assert.deepEqual(arc.days.slice(0, 4).map((d) => d.difficulty), [4, 3, 2, 1],
     'each day keeps the difficulty it had');
 
-  await assert.rejects(srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-08-21' }), /future-edition/);
-  await assert.rejects(srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-07-31' }), /before-launch/);
+  await assert.rejects(srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-10-23' }), /future-edition/);
+  await assert.rejects(srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-10-02' }), /before-launch/);
   await assert.rejects(srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: 'yesterday' }), /bad-date/);
 
-  const day = await srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-08-05' });
-  assert.equal(day.edition.id, 'd:2026-08-05:orchard', 'the archive replays the board that actually ran');
+  const day = await srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-10-07' });
+  assert.equal(day.edition.id, 'd:2026-10-07:orchard', 'the archive replays the board that actually ran');
   assert.equal(day.edition.difficulty, 3, 'Wednesday');
   assert.equal(day.edition.ranked, true);
 });
 
 test('an archived board ranks on its own day, but cannot manufacture a streak or a week', async () => {
-  const clk = clock('2026-08-20T12:00:00Z');
-  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-08-01' });
+  const clk = clock('2026-10-22T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-10-03' });
   const { token } = await signIn(srv, 'a@b.co', 'Ana');
   const u = () => userOf(srv, token);
 
@@ -391,39 +391,39 @@ test('an archived board ranks on its own day, but cannot manufacture a streak or
   assert.equal(live.last.result.streak, 1);
 
   // then go back and fill in the two days before it from the archive
-  for (const date of ['2026-08-19', '2026-08-18']) {
+  for (const date of ['2026-10-21', '2026-10-20']) {
     const s = await srv.start(await u(), { mode: 'archive', themeId: 'orchard', date });
     const r = await playHonestly(srv, token, s.playId, s.view, 900, clk);
     assert.equal(r.last.result.ranked, true, 'archive runs still rank on that day');
   }
 
-  const board = await srv.board('d:2026-08-19:orchard', await u());
+  const board = await srv.board('d:2026-10-21:orchard', await u());
   assert.equal(board.entries.length, 1, 'and appear on that day\'s leaderboard');
 
   const after = await srv.start(await u(), { mode: 'daily', themeId: 'coldopen' });
   const r = await playHonestly(srv, token, after.playId, after.view, 900, clk);
   assert.equal(r.last.result.streak, 1, 'back-filled days do not repair a streak');
 
-  const week = await srv.week('2026-W34');
+  const week = await srv.week('2026-W43');
   const me = week.standings[0];
   assert.equal(me.daysCompleted, 1, 'nor rewrite a finished week — and two themes on one day is still one day');
 });
 
 test('the archive shows you which days you have already done', async () => {
-  const clk = clock('2026-08-20T12:00:00Z');
-  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-08-10' });
+  const clk = clock('2026-10-22T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0, launchDate: '2026-10-12' });
   const { token } = await signIn(srv, 'a@b.co');
   const u = () => userOf(srv, token);
-  const s = await srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-08-14' });
+  const s = await srv.start(await u(), { mode: 'archive', themeId: 'orchard', date: '2026-10-16' });
   const played = await playHonestly(srv, token, s.playId, s.view, 700, clk);
 
   const arc = await srv.archive(await u(), { themeId: 'orchard', days: 20 });
   assert.equal(arc.completed, 1);
-  const row = arc.days.find((d) => d.date === '2026-08-14')!;
+  const row = arc.days.find((d) => d.date === '2026-10-16')!;
   assert.equal(row.played, true);
   assert.equal(row.score, played.last.result.score);
   assert.equal(row.late, true, 'flagged as played from the archive');
-  assert.equal(arc.days.find((d) => d.date === '2026-08-13')!.played, false);
+  assert.equal(arc.days.find((d) => d.date === '2026-10-15')!.played, false);
   // a different theme has its own archive
   assert.equal((await srv.archive(await u(), { themeId: 'coldopen', days: 20 })).completed, 0);
 });
@@ -838,4 +838,63 @@ test('a player can take a copy of everything and then erase themselves', async (
   assert.equal(await srv.store.userForToken(token, clk.now()), undefined, 'and so is the session');
   const board = await srv.board(start.edition.id, null);
   assert.equal(board.entries.length, 0, 'and they are off the leaderboard');
+});
+
+
+/* ------------------------------------------------------------------ *
+ * Keyed seeds. A ranked board used to be a pure function of its date, so anyone with the
+ * code could build tomorrow's and solve it tonight. From SECRET_SEEDS_FROM its seed is
+ * keyed with a server secret; earlier boards keep theirs, and replays of them stop ranking.
+ * ------------------------------------------------------------------ */
+
+const AFTER = '2026-09-26T16:00:00Z';   // a Saturday, after the switch
+const BEFORE = '2026-09-20T16:00:00Z';  // the Sunday before it
+const LAUNCH = '2026-08-20';
+const refOf = (srv: GameServer, body: any) => (srv as any).refFor(body);
+
+test('after the switch, a ranked seed cannot be derived from the date', async () => {
+  const opts = (editionSecret: string) => ({ now: clock(AFTER).now, editionSecret, launchDate: LAUNCH });
+  const body = { mode: 'daily', themeId: 'orchard' };
+  const a = await refOf(await makeServer(opts('secret-a')), body);
+  const b = await refOf(await makeServer(opts('secret-b')), body);
+  const again = await refOf(await makeServer(opts('secret-a')), body);
+  assert.ok(a.ref.date >= SECRET_SEEDS_FROM);
+  assert.notEqual(a.ref.seed, `daily|${a.ref.date}|orchard`, 'still the public, date-derived seed');
+  assert.notEqual(a.ref.seed, b.ref.seed, 'the secret has no effect on the seed');
+  // every serverless instance must hand every player the same board
+  assert.equal(a.ref.seed, again.ref.seed);
+  // leaderboards key on the id, so it must not move with the seed
+  assert.equal(a.ref.id, `d:${a.ref.date}:orchard`);
+});
+
+test('a board from before the switch keeps the seed it was played with', async () => {
+  const srv = await makeServer({ now: clock(BEFORE).now, editionSecret: 'secret-a', launchDate: LAUNCH });
+  const r = await refOf(srv, { mode: 'daily', themeId: 'orchard' });
+  assert.ok(r.ref.date < SECRET_SEEDS_FROM);
+  assert.equal(r.ref.seed, `daily|${r.ref.date}|orchard`, 'the archive must replay the board that actually ran');
+});
+
+test('production refuses a keyed board without the secret, rather than fall back', async () => {
+  const srv = await makeServer({ now: clock(AFTER).now, dev: false, launchDate: LAUNCH });
+  await assert.rejects(refOf(srv, { mode: 'daily', themeId: 'orchard' }),
+    (e: any) => e.status === 503 && e.code === 'edition-secret-missing');
+  // practice boards need no secret, so the game still works without one
+  assert.equal((await refOf(srv, { mode: 'free', themeId: 'orchard' })).ranked, false);
+});
+
+test('replays from before the switch are unranked; boards after it are ranked', async () => {
+  const srv = await makeServer({ now: clock(AFTER).now, editionSecret: 'secret-a', launchDate: LAUNCH });
+  assert.equal((await refOf(srv, { mode: 'archive', themeId: 'orchard', date: '2026-09-22' })).ranked, false);
+  assert.equal((await refOf(srv, { mode: 'archive', themeId: 'orchard', date: '2026-09-25' })).ranked, true);
+  // Saturday's week: Monday predates the switch, Saturday does not
+  assert.equal((await refOf(srv, { mode: 'weekly', themeId: 'orchard', dayIndex: 0 })).ranked, false);
+  assert.equal((await refOf(srv, { mode: 'weekly', themeId: 'orchard', dayIndex: 5 })).ranked, true);
+});
+
+test("switching on never un-ranks the board people are playing today", async () => {
+  const srv = await makeServer({ now: clock('2026-09-24T16:00:00Z').now, editionSecret: 'secret-a', launchDate: LAUNCH });
+  const r = await refOf(srv, { mode: 'weekly', themeId: 'orchard' });
+  assert.equal(r.ref.date, '2026-09-24');
+  assert.ok(r.ref.date < SECRET_SEEDS_FROM);
+  assert.equal(r.ranked, true);
 });
