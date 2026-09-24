@@ -354,7 +354,9 @@ and the deploy build has no business doing that. Install it where you run the ch
     npm i --no-save playwright && npx playwright install chromium
 
 — and `npm run e2e` picks it up. Without it the script says so and exits rather than
-failing obscurely. `npm run verify` runs tests, fuzz and e2e.
+failing obscurely. `npm run verify` typechecks and runs the 82 unit tests, the fuzz, the
+demo build and then e2e. The Postgres store is covered separately by `npm run test:pg`,
+which needs a running server.
 
 
 ## Deploying
