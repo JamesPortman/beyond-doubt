@@ -1,5 +1,5 @@
 import { createServer, IncomingMessage, ServerResponse } from 'node:http';
-import { randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { Store, SqliteStore, newId, roomCode, UserRow } from './store.js';
@@ -26,6 +26,10 @@ export interface ServerOptions {
   launchDate?: string;
   /** dev returns the login code in the response instead of emailing it */
   dev?: boolean;
+  /** Keys the seeds of ranked boards dated SECRET_SEEDS_FROM or later (EDITION_SECRET).
+   *  Production MUST set it: without it those boards refuse to start, rather than fall
+   *  back to a seed anyone with the code can derive. Dev and tests use a placeholder. */
+  editionSecret?: string;
   staticDir?: string;
   now?: () => number;
   hintBudget?: number;
@@ -121,6 +125,7 @@ export class GameServer {
       sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
       timezone,
       adminToken: o.adminToken ?? '',
+      editionSecret: o.editionSecret ?? '',
       staticDir: o.staticDir,
     };
   }
@@ -194,8 +199,13 @@ export class GameServer {
     const ids = themeIds();
     if (!ids.includes(body.themeId)) throw new HttpError(400, 'unknown-theme');
     this.gate(flags, body.mode, body.themeId);
+    // A ranked result means the board could not be built in advance. Replays of days from
+    // before keyed seeds fail that — anyone can rebuild those boards from the code — so
+    // they are not ranked; the leaderboard from the day itself stands. Today's board keeps
+    // its ranking until midnight, so switching this on never takes a live board away.
+    const rankable = (ref: EditionRef) => keyedDate(ref) || ref.date === isoDate(today);
     if (body.mode === 'daily') {
-      return { ref: dailyEdition(ids, today, body.themeId), ranked: true };
+      return { ref: this.keyed(dailyEdition(ids, today, body.themeId)), ranked: true };
     }
     if (body.mode === 'archive') {
       const iso = String(body.date ?? '');
@@ -204,14 +214,15 @@ export class GameServer {
       if (Number.isNaN(when.getTime())) throw new HttpError(400, 'bad-date');
       if (iso > isoDate(today)) throw new HttpError(403, 'future-edition');
       if (iso < this.opts.launchDate) throw new HttpError(403, 'before-launch');
-      return { ref: archiveEdition(ids, when, body.themeId), ranked: true };
+      const ref = archiveEdition(ids, when, body.themeId);
+      return { ref: this.keyed(ref), ranked: rankable(ref) };
     }
     if (body.mode === 'weekly') {
       const week = weeklyEdition(ids, today, body.themeId);
       const todayIdx = (today.getUTCDay() || 7) - 1;
       const idx = Math.max(0, Math.min(6, body.dayIndex ?? todayIdx));
       if (idx > todayIdx) throw new HttpError(403, 'future-edition');
-      return { ref: week[idx], ranked: true };
+      return { ref: this.keyed(week[idx]), ranked: rankable(week[idx]) };
     }
     // free play: the SERVER picks the seed, and the result is never ranked
     const seed = `free|${body.themeId}|${randomInt(2 ** 31)}`;
@@ -220,6 +231,17 @@ export class GameServer {
       ref: { id: `f:${seed}`, kind: 'free', themeId: body.themeId, difficulty, seed },
       ranked: false,
     };
+  }
+
+  /** A ranked board's seed, keyed so it cannot be derived from the date. Only the seed
+   *  changes — id, date and difficulty stay as they were — and it never leaves the server
+   *  (protocol.ts), so a player learns today's board by playing it and no sooner. */
+  private keyed(ref: EditionRef): EditionRef {
+    if (!keyedDate(ref)) return ref;
+    const secret = this.opts.editionSecret || (this.opts.dev ? DEV_EDITION_SECRET : '');
+    if (!secret) throw new HttpError(503, 'edition-secret-missing');
+    const mac = createHmac('sha256', secret).update(ref.seed).digest('base64url');
+    return { ...ref, seed: `k1|${mac}` };
   }
 
   puzzleFor(ref: EditionRef): Puzzle {
@@ -752,6 +774,20 @@ export class GameServer {
     return srv;
   }
 }
+
+/** Ranked boards dated on or after this day take a seed keyed with EDITION_SECRET.
+ *
+ *  Before it, a board's seed was `daily|<date>|<theme>` (weekly likewise), and boards are
+ *  pure functions of their seed — so anyone with the code could build tomorrow's ranked
+ *  board tonight and solve it offline with the engine's own solver. The server already
+ *  refused to HAND OUT a future board; nothing stopped anyone computing one.
+ *
+ *  Earlier boards keep their original seeds: they have been played and ranked, and the
+ *  archive promises the board that actually ran. What changes for them is that a replay
+ *  is no longer ranked — see refFor. */
+export const SECRET_SEEDS_FROM = '2026-09-25';
+const DEV_EDITION_SECRET = 'dev-only-edition-secret';
+const keyedDate = (ref: EditionRef) => !!ref.date && ref.date >= SECRET_SEEDS_FROM;
 
 export class HttpError extends Error {
   constructor(public status: number, public code: string) { super(code); }

@@ -103,10 +103,13 @@ Themes are chosen from a dropdown in the header and in Settings.
 ### The archive, and why late results are flagged
 
 Every daily since launch is playable from a calendar grid, showing which you have finished,
-your score, and each day's difficulty. Boards are pure functions of their date, so the archive
-serves the board that *actually ran* — not a regenerated approximation.
+your score, and each day's difficulty. A board is a pure function of its seed, and the server
+derives each day's seed the same way every time, so the archive serves the board that
+*actually ran* — not a regenerated approximation.
 
-An archived run **is** ranked on that day's own leaderboard (first attempt only). It is
+An archived run **is** ranked on that day's own leaderboard (first attempt only) — for days from
+2026-09-25 on. Boards before that were seeded from the date alone, so anyone with the code can
+rebuild them; replays of those days are practice, and the leaderboard from the day stands. It is
 recorded with `late = 1`, which excludes it from two things:
 
 - **Streaks.** Otherwise you could back-fill a fortnight and manufacture a 14-day streak.
@@ -184,6 +187,14 @@ The server re-checks every move anyway. You get zero-latency play and full autho
 **Editions come from the server's calendar.** The client sends a *mode* — `daily`, `weekly`,
 `free` — never a seed or a date. You cannot request tomorrow's board, drop back to Monday's
 easier one, or hand-pick a seed you already solved.
+
+**Nor can you compute tomorrow's board.** A ranked board dated 2026-09-25 or later is seeded
+with an HMAC of its date and theme under `EDITION_SECRET`, which only the server holds. Before
+that, the seed *was* the date and theme, so with the code in hand anyone could build tomorrow's
+board tonight and solve it offline with the engine's own solver. Production refuses to start a
+ranked board without the secret rather than fall back. The browser builds only practice boards —
+split play and the offline fallback included — because a board built in the page carries its
+whole solution.
 
 **The first completed attempt is the ranked one.** Replaying a board you have solved is
 practice; it cannot improve your placement. Free play is never ranked at all.

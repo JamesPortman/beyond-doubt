@@ -106,10 +106,12 @@
 
     <h3>Time, and who owns it</h3>
     <p class="sub">core/edition.ts</p>
-    <p>Every board is a pure function of its date and theme, so two people opening the same
-    day's puzzle on opposite sides of the world generate the identical board independently,
-    with nothing passed between them. The archive can therefore serve the board that
-    actually ran on a past day without having stored it.</p>
+    <p>Every board is a pure function of its seed, and the server derives each day's seed from
+    the date and theme the same way every time — so two people opening the same day's puzzle
+    on opposite sides of the world get the identical board, and the archive can serve the
+    board that actually ran on a past day without having stored it.</p>
+    <p>The seed is keyed with a secret only the server holds. Were it the bare date, as it once
+    was, anyone reading this code could build tomorrow's board tonight and solve it offline.</p>
     <p>"Which day is it" belongs to the server, and it is a <em>civil</em> date in the
     game's own timezone rather than a UTC one — a daily that rolls over in UTC arrives at
     eight in the evening for anyone in Eastern time. Civil-day arithmetic anchors at noon

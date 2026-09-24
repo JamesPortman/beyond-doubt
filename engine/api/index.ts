@@ -54,6 +54,9 @@ const server = new GameServer({
   // The first day the archive will offer. Unset means "today", so a fresh deploy never
   // claims to have boards from before it existed.
   launchDate: process.env.LAUNCH_DATE,
+  // Keys ranked boards' seeds so they cannot be computed ahead of time from the public
+  // code. Unset in production and ranked boards refuse to start — see SECRET_SEEDS_FROM.
+  editionSecret: process.env.EDITION_SECRET,
 });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
