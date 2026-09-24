@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clues — Architecture</title>
+<title>Beyond Doubt — Architecture</title>
 <style>
   :root{--ink:#15181d;--ink2:#454c57;--ink3:#727a86;--paper:#f5f3ee;--card:#fffefb;
         --rule:#ded8cc;--accent:#b5501f;--good:#2f6f57;--code:#f0ece2}
@@ -50,7 +50,7 @@
 <body>
 <div class="wrap">
 
-<p class="kicker">Clues — system architecture</p>
+<p class="kicker">Beyond Doubt — system architecture</p>
 <h1>One engine, seven games,<br>three languages, no guessing</h1>
 <p class="lede">The whole system is organised around a single claim: <b>the player is never
 asked to guess.</b> Everything else — how themes work, how the server verifies a score, how
@@ -102,7 +102,7 @@ propagator; the interface would not change.</p>
   </defs>
   <rect x="20" y="20" width="860" height="66" rx="5" fill="#fffefb" stroke="#ded8cc"/>
   <text x="36" y="46" font-family="ui-monospace,Menlo" font-size="12" fill="#727a86">PRESENTATION</text>
-  <text x="36" y="70" font-family="Georgia,serif" font-size="15" fill="#15181d">demo app · themes (7) · tile artwork · settings · Inspect · rooms</text>
+  <text x="36" y="70" font-family="Georgia,serif" font-size="15" fill="#15181d">demo app · themes (7) · tile artwork · settings · Inspect · rooms · pages</text>
 
   <rect x="20" y="104" width="420" height="66" rx="5" fill="#fffefb" stroke="#ded8cc"/>
   <text x="36" y="130" font-family="ui-monospace,Menlo" font-size="12" fill="#727a86">LANGUAGE</text>
@@ -110,11 +110,11 @@ propagator; the interface would not change.</p>
 
   <rect x="460" y="104" width="420" height="66" rx="5" fill="#fffefb" stroke="#ded8cc"/>
   <text x="476" y="130" font-family="ui-monospace,Menlo" font-size="12" fill="#727a86">TRANSPORT</text>
-  <text x="476" y="154" font-family="Georgia,serif" font-size="15" fill="#15181d">protocol · server · client · store</text>
+  <text x="476" y="154" font-family="Georgia,serif" font-size="15" fill="#15181d">protocol · server · client · store · store-pg · flags</text>
 
   <rect x="20" y="188" width="860" height="76" rx="5" fill="#fff7ec" stroke="#b5501f" stroke-width="1.6"/>
   <text x="36" y="214" font-family="ui-monospace,Menlo" font-size="12" fill="#b5501f">ENGINE — knows nothing about themes, languages or players</text>
-  <text x="36" y="240" font-family="Georgia,serif" font-size="15" fill="#15181d">grid (bitmasks) · clue AST (9 kinds) · solver · generator · session · scoring · editions</text>
+  <text x="36" y="240" font-family="Georgia,serif" font-size="15" fill="#15181d">grid (bitmasks) · clue AST (9 kinds) · solver · generator · session · scoring · editions · streaks</text>
 
   <rect x="20" y="282" width="860" height="40" rx="5" fill="#f0ece2" stroke="#ded8cc"/>
   <text x="36" y="307" font-family="ui-monospace,Menlo" font-size="12.5" fill="#454c57">seeded PRNG — every board is a pure function of a string</text>
@@ -148,8 +148,14 @@ touched.</p>
 <p>Each tile's picture is inline SVG generated from the board's label seed. Six drawing
 functions cover the seven themes. This buys determinism (same board, same faces, in every
 language, offline), state-awareness (a guilty guest is struck through, a blighted tree loses
-its fruit, a forged canvas cracks), and free theming. The entire illustrated build — seven
-themes, three languages — is one 200 KB HTML file with no network requests.</p>
+its fruit, a forged canvas cracks), and free theming. The game page — seven themes,
+three languages — builds to one self-contained ~260 KB HTML file.</p>
+
+<p>One theme is the exception: Auction Night declares an <code>images</code> set — 21
+paintings and photographs in <code>demo/assets/gallery/</code>, dealt from the label seed
+and marked with a red dot when sold, since a photograph cannot be redrawn. Those files load
+at runtime; the single-file build has no assets beside it and falls back to the drawn
+tile.</p>
 
 <h2>4 · Why the language layer is not string substitution</h2>
 
@@ -165,7 +171,7 @@ themes, three languages — is one 200 KB HTML file with no network requests.</p
 
 <p>"Tree" is feminine in Portuguese and masculine in Spanish, so the numeral, the article and
 the adjective all change. That gender belongs to the <b>theme</b>, not the engine — switch to
-The Wall and the same clue renders <span class="mono">exatamente dois quadros são falsos</span>.
+The Guest List and the same clue renders <span class="mono">exatamente dois convidados são culpados</span>.
 Person names carry their own gender too, because <i>Nadia é culpada</i> and <i>Owen é
 culpado</i> are different words.</p>
 
@@ -238,7 +244,9 @@ it.</p>
     <h3 style="margin-top:0">Split clues</h3>
     <p style="font-size:15px;margin:0">One device. The clue set is dealt across 2–4 players and
     nobody can finish alone. Changes no rule: legality stays global, so the <i>table</i>
-    collectively knows enough. The game becomes people talking.</p>
+    collectively knows enough. The game becomes people talking. <b>Shelved, not deleted:</b>
+    <code>Session.cluesFor()</code> and <code>dealClues()</code> are still in the engine and
+    still tested, but the demo no longer offers the tab.</p>
   </div>
   <div class="card">
     <h3 style="margin-top:0">Rooms</h3>
@@ -263,16 +271,22 @@ deploy serverless. Players who stop beating go stale rather than vanishing.</p>
 <h2>7 · Editions, scoring, leaderboards</h2>
 
 <ul>
-  <li><b>Daily</b> — one board, difficulty 1–7 Monday to Sunday, streaks tracked.</li>
+  <li><b>Daily</b> — one board, difficulty 1–7 Monday to Sunday, streaks tracked. The day
+  rolls over on Eastern time (<code>America/Toronto</code>), not UTC.</li>
   <li><b>Weekly edition</b> — seven boards in one skin, ranked as a set. Days ahead of today are locked.</li>
+  <li><b>Archive</b> — every daily back to the launch date, ranked on that day's own board
+  (first attempt only), but recorded as <code>late</code> so it cannot back-fill a streak or a
+  finished week.</li>
   <li><b>Free play</b> — server-chosen seed, never ranked, and shareable as a link because a
   seed <i>is</i> the whole scenario.</li>
 </ul>
 
-<p>Scoring weighs time against par for the difficulty, multiplies by difficulty, and deducts
-flat penalties for hints and mistakes — a clean Sunday outranks a fast Monday. Speed is
+<p>Scoring weighs time against par for the difficulty, multiplies by difficulty, deducts a
+flat penalty per hint, and adds a minute to the clock per mistake — a clean Sunday outranks a
+fast Monday. Speed is
 capped so an implausible solve cannot run away with the board. Weekly standings rank by days
-completed first and total score second: finishing all seven beats one enormous Tuesday.</p>
+completed first (distinct days, not results) and total score second: finishing all seven
+beats one enormous Tuesday.</p>
 
 <h2>8 · Accessibility as a derivation</h2>
 
@@ -294,15 +308,28 @@ ink. Both were fixed in the derivation, not in the test.</p>
 <table>
   <tr><th>host</th><th>changes needed</th><th>why</th></tr>
   <tr><td>Fly · Railway · Render</td><td>none</td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
-  <tr><td>Vercel</td><td>swap SQLite for hosted Postgres</td><td>no persistent disk, no memory between requests</td></tr>
+  <tr><td>Vercel</td><td>set <code>DATABASE_URL</code> to a hosted Postgres</td><td>no persistent disk, no memory between requests</td></tr>
   <tr><td>Static only</td><td>none</td><td>the client already falls back to local play when no server answers</td></tr>
 </table>
 
 <p>Two properties make serverless viable at all, and both were designed in rather than
 patched on: <b>every cache is rebuildable</b> (puzzles regenerate from their seed, play state
-replays from validated moves), and <b>rate limiting reads the database</b>. The one piece not
-yet written is a Postgres <code>Store</code> — ~20 methods of plain SQL behind one class,
-with the SQLite implementation as the reference.</p>
+replays from validated moves), and <b>rate limiting reads the database</b>.</p>
+
+<p>On Vercel, <code>vercel.json</code> builds the engine and the demo into
+<code>demo/dist</code> and rewrites every <code>/api/*</code> route to one function,
+<code>api/index.ts</code>, which runs the same <code>GameServer</code> as
+<code>npm run serve</code> over <code>PostgresStore</code> (<code>src/net/store-pg.ts</code>).
+It migrates on cold start, refuses to start without <code>DATABASE_URL</code> (or
+<code>POSTGRES_URL</code>), and delivers sign-in codes through Resend. <code>npm run test:pg</code>
+runs the whole server suite against Postgres, so both stores answer to the same tests.
+Operator feature flags (<code>src/net/flags.ts</code>) are enforced server-side and sit
+behind their own <code>ADMIN_TOKEN</code>; unset, <code>/api/admin/*</code> does not exist.</p>
+
+<p>The deployment answers at its own domain root and under
+<code>www.portman.ca/beyond-doubt/</code>. <code>src/base.ts</code> recovers that prefix from
+<code>location.pathname</code> at runtime, and both the API client and the Auction Night
+artwork carry it, so one build serves both URLs.</p>
 
 <h2>10 · Map of the repo</h2>
 
@@ -314,6 +341,7 @@ with the SQLite implementation as the reference.</p>
     generate.ts — proven forced path<br>
     session.ts — legality, hints, dealing<br>
     scoring.ts · edition.ts · leaderboard.ts<br>
+    streak.ts · share.ts<br>
     rng.ts — seeded, deterministic
   </div>
   <div class="card"><b>src/i18n</b>
@@ -327,6 +355,7 @@ with the SQLite implementation as the reference.</p>
   </div>
   <div class="card"><b>src/render</b>
     art.ts — procedural illustration<br>
+    deal.ts — seeded image deal<br>
     settings.ts — palette derivation<br>
     skin.ts — theme → CSS vars
   </div>
@@ -334,18 +363,22 @@ with the SQLite implementation as the reference.</p>
     protocol.ts — the wire format<br>
     server.ts — authoritative play<br>
     client.ts — typed browser client<br>
-    store.ts — SQLite, plain SQL
+    store.ts — SQLite, plain SQL<br>
+    store-pg.ts — Postgres, same interface<br>
+    flags.ts — operator feature flags
   </div>
   <div class="card"><b>test · demo · api</b>
-    46 tests + a 294-board fuzz<br>
-    demo/ — single-file build<br>
-    api/ + vercel.json — serverless
+    82 tests + a 294-board fuzz<br>
+    demo/ — single-file game + how, tech, legal, account pages<br>
+    api/ + vercel.json — serverless<br>
+    src/base.ts — path prefix
   </div>
 </div>
 
-<p class="foot">Verification: 46 tests, a 294-board fuzz across every theme and difficulty
-(12,012 clue renders), WCAG contrast assertions across 63 theme/mode combinations, and
-anti-cheat tests covering every claim in section 5. Worst observed generate-and-solve: ~70ms.</p>
+<p class="foot">Verification: 82 tests, a 294-board fuzz across every theme and difficulty
+(11,982 clue renders), WCAG contrast assertions across 63 theme/mode combinations, and
+anti-cheat tests covering every claim in section 5. <code>npm run e2e</code> drives Chromium
+against a real server for what unit tests cannot see. Worst observed generate-and-solve: ~120ms.</p>
 
 </div>
 </body>
