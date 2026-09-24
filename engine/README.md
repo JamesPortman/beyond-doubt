@@ -9,7 +9,7 @@ illustration function.
 
 ```
 npm install
-npm run verify      # types, 46 tests, 294-board fuzz, then builds the demo
+npm run verify      # types, 82 tests, 294-board fuzz, builds the demo, then e2e
 npm run serve       # http://localhost:8787  — accounts + ranked play
 ```
 
@@ -38,16 +38,23 @@ src/core/     grid.ts      geometry as bitmasks — a whole board state is one 3
               generate.ts  builds a board WITH a proven forced solve path
               session.ts   play state, legality, hints, split-clue dealing
               scoring.ts   time / hints / mistakes / difficulty -> score
-              edition.ts   daily + weekly editions from the calendar
+              edition.ts   daily + weekly + archive editions from the calendar
+              streak.ts    current / best streak from played dates
+              share.ts     the shareable result
               leaderboard.ts  pluggable store (memory + browser-local included)
 src/i18n/     en.ts pt.ts es.ts — clue rendering per language, not string substitution
 src/themes/   seven themes as pure data + palette
-src/render/   art.ts — procedural tile illustration, one drawing function per theme
+src/render/   art.ts       procedural tile illustration, one drawing function per theme
+              deal.ts      seeded deal of a theme's real artwork
+              settings.ts  palette derivation;  skin.ts  theme -> CSS custom properties
 src/net/      protocol.ts  the wire format
-              server.ts    accounts, authoritative play, leaderboards (node:http + node:sqlite)
+              server.ts    accounts, authoritative play, leaderboards (node:http)
+              store.ts     SQLite (node:sqlite);  store-pg.ts  Postgres, same interface
+              flags.ts     operator feature flags, enforced server-side
               client.ts    typed browser client
-src/render/   theme -> CSS custom properties
-demo/         a playable single-file build of all of it
+src/base.ts   the /beyond-doubt path prefix, recovered at runtime
+api/          Vercel serverless entry point
+demo/         a playable single-file build of all of it, plus how, tech, legal and account pages
 ```
 
 ### Why the clue layer looks the way it does
@@ -68,8 +75,8 @@ Rendered:
 
 "Tree" is feminine in Portuguese (*a árvore*) and masculine in Spanish (*el árbol*), so the
 numeral, the article and the adjective all change. That gender belongs to the **theme**, not
-the engine — swap to The Wall (*o quadro* / *el cuadro*, both masculine) and the same clue
-renders `exatamente dois quadros são falsos`. Themes therefore declare gendered nouns and
+the engine — swap to The Guest List (*o convidado* / *el invitado*, both masculine) and the
+same clue renders `exatamente dois convidados são culpados`. Themes therefore declare gendered nouns and
 full four-slot predicate forms, and nothing anywhere concatenates an adjective onto an
 unknown noun. Person names carry their own gender too, because *Nadia é culpada* and
 *Owen é culpado* are different words.
@@ -114,8 +121,9 @@ talking to each other. `Session.cluesFor(player)` is the whole implementation.
 
 ## Scoring and leaderboards
 
-`scoreRun()` weighs time against par for the difficulty, multiplies by difficulty, and deducts
-flat penalties for hints and mistakes, so a clean Sunday outranks a fast Monday. Speed is
+`scoreRun()` weighs time against par for the difficulty, multiplies by difficulty, deducts a
+flat penalty per hint, and adds a minute to the clock per mistake, so a clean Sunday outranks
+a fast Monday. Speed is
 capped so an implausible solve cannot run away with the board.
 
 `scoreRun()` is shared by both paths, but online it is only ever called on the server, from
@@ -191,13 +199,15 @@ board. That is a social problem, not a cryptographic one, and every daily puzzle
 ### Auth
 
 Passwordless six-digit code by email. In dev the code comes back in the response body so you
-can sign in without an email provider; in production `authRequest` should send it and return
-`{ sent: true }` alone. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
+can sign in without an email provider; in production `authRequest` hands it to the
+`sendEmail` option (Resend, in `api/index.ts`) and returns `{ sent: true }` alone. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
 
 ### Storage
 
-`node:sqlite` — one file, zero operations. Every query is plain SQL in `store.ts`; moving to
-Postgres is a driver swap. Requires Node 22.5+.
+`node:sqlite` — one file, zero operations. Every query is plain SQL in `store.ts`. Requires
+Node 22.5+. `PostgresStore` in `store-pg.ts` implements the same `Store` interface and is used
+whenever `DATABASE_URL` (or `POSTGRES_URL`) is set; `npm run test:pg` runs the whole server
+suite against it.
 
 
 ## Tile artwork
@@ -206,7 +216,7 @@ Every tile is illustrated, and every illustration is *drawn* rather than fetched
 `src/render/art.ts` emits inline SVG seeded from the board's label seed. Six drawing
 functions cover the seven themes: portraits (in colour for The Guest List, as a
 high-contrast photocopy for The Callboard), orchard trees with three growth habits,
-framed paintings mixed from a ten-pigment box, personnel dossiers, star fields, and
+framed paintings mixed from a twelve-pigment box, personnel dossiers, star fields, and
 storyboard frames.
 
 Doing it this way buys four things that an asset pipeline would not:
@@ -217,11 +227,13 @@ Doing it this way buys four things that an asset pipeline would not:
   tree loses its fruit and gains lesions, a forged canvas cracks, a flagged file gets
   stamped. The picture *is* the feedback.
 - **Theming.** Drawings read the theme palette, so a new skin needs no new assets.
-- **Size.** The entire illustrated demo, seven themes and three languages included, is one
-  132 KB HTML file with no network requests.
+- **Size.** The entire illustrated game, seven themes and three languages included, is one
+  self-contained ~260 KB HTML file.
 
-If you later commission real illustration, `tileArt()` is the single seam — return an
-`<img>` and nothing else in the codebase changes. Tests assert the art is deterministic,
+Real artwork plugs in through a theme's `images` set, and Auction Night uses it: 21
+paintings and photographs in `demo/assets/gallery/`, dealt from the label seed and marked
+with a red dot when sold. They load at runtime, so the single-file build, which has no
+assets beside it, falls back to the drawn tile. `tileArt()` remains the single seam. Tests assert the art is deterministic,
 well-formed, varied within a board, different across boards, and visibly state-dependent.
 
 The grid is square: tiles are 1:1 with the drawing edge to edge and a caption bar across
@@ -355,14 +367,15 @@ where the *server* lives, and it comes down to one question: does the host give 
 | Host | What you change | Why |
 |---|---|---|
 | **Fly.io / Railway / Render** | nothing | a real Node process with a mounted volume — `npm run serve` is the whole deployment |
-| **Vercel** | swap SQLite for hosted Postgres | serverless functions have no persistent disk and no memory between requests |
+| **Vercel** | set `DATABASE_URL` to a hosted Postgres | serverless functions have no persistent disk and no memory between requests |
 | **Static only (no server)** | nothing | the demo already falls back to local play when no server answers |
 
 ### Vercel specifically
 
 `vercel.json` and `api/index.ts` are in the repo. One serverless function handles every
-`/api/*` route by reusing the same `GameServer` as local development, so there is no second
-copy of the rules to keep in sync.
+`/api/*` route by reusing the same `GameServer` as local development over `PostgresStore`,
+so there is no second copy of the rules to keep in sync. It migrates on cold start and
+refuses to start without a database URL.
 
 Two properties of the architecture make this work at all, and both were designed in rather
 than patched on:
@@ -376,11 +389,12 @@ than patched on:
 ### Served under a path prefix
 
 The Vercel deployment answers on two URLs: its own domain at the root, and
-`www.portman.ca/beyond-doubt/`, which proxies it as a subpath. `defaultApiBase()` in
-`src/net/client.ts` recovers the prefix from `location.pathname` and prepends it to the
-API origin, so one build serves both with no environment flag. The demo pages already
-link to each other relatively, so nothing else needed changing; keep it that way when
-adding a page. `test/client-base.test.ts` pins the prefix rules, including that a path
+`www.portman.ca/beyond-doubt/`, which proxies it as a subpath. `src/base.ts` recovers the
+prefix from `location.pathname`; `defaultApiBase()` in `src/net/client.ts` prepends it to
+the API origin, and Auction Night's artwork URLs carry it too, so one build serves both with
+no environment flag. Anything else the browser fetches by a site-root path needs the same
+treatment. The demo pages link to each other relatively; keep it that way when adding a
+page. `test/client-base.test.ts` pins the prefix rules, including that a path
 merely *starting* with the same letters is a different app.
 
 What you still have to do:
@@ -388,25 +402,22 @@ What you still have to do:
 1. **Provision Postgres** (Vercel Postgres, Neon, Supabase — any of them). SQLite on Vercel
    writes to `/tmp`, which is per-instance and wiped without warning. It will *appear* to
    work in testing and lose accounts in production.
-2. **Write `PostgresStore`.** `src/net/store.ts` is ~20 methods of plain SQL behind one
-   class; nothing above it knows what database it is talking to. The translation is
-   mechanical: `INTEGER PRIMARY KEY` → `bigserial`, `?` → `$1`, `ON CONFLICT … DO UPDATE`
-   is already Postgres-compatible syntax, and `DatabaseSync`'s synchronous `.get/.all/.run`
-   become awaited calls, which makes `Store`'s methods async. **This is the one piece not
-   written yet** — the SQLite implementation is the reference.
-3. **Set the secrets:** `DATABASE_URL`, and `NODE_ENV=production` so login codes stop coming
-   back in the response body.
-4. **Send real email.** `authRequest` currently returns the six-digit code to the caller,
-   which is correct for development and unacceptable in production. Swap in Resend, Postmark
-   or SES — it is a four-line change in one method.
-5. **Watch the cold-start cost.** Generating a 4x5 board is ~70ms and replaying twenty moves
+2. **Set the secrets:** `DATABASE_URL`, and `NODE_ENV=production` so login codes stop coming
+   back in the response body. `ALLOWED_ORIGINS`, `ADMIN_TOKEN` (unset, `/api/admin/*` does
+   not exist) and `LAUNCH_DATE` are optional.
+3. **Send real email.** `api/index.ts` delivers codes through Resend and needs
+   `RESEND_API_KEY` (and `MAIL_FROM` for a verified sender). Without it a sign-in request
+   fails loudly rather than leaving the player waiting for a code that is not coming.
+4. **Watch the cold-start cost.** Generating a 4x5 board is ~70ms and replaying twenty moves
    costs a few deductions, so a cold request can run ~300ms. Caching the daily boards in the
    database at midnight would remove it if that ever matters.
 
 ### If you would rather not do any of that
 
 Deploy to Fly or Railway with a small volume mounted at `/data` and set
-`DB=/data/clues.db`. `npm run serve` is then the entire deployment, SQLite and all, and the
-Postgres work above disappears. For a daily puzzle game with a leaderboard this is very
-likely the right call — one process and one file will carry you a long way, and the code is
-already written.
+`DB=/data/clues.db`, and `npm run serve` runs the whole game on SQLite, one process and one
+file. Two things stand between that and production as `scripts/serve.mjs` is written today:
+with `NODE_ENV=production` it refuses to start without `DATABASE_URL` and `ALLOWED_ORIGINS`,
+and it passes no `sendEmail`, so sign-in codes would go nowhere. Both are small changes to
+that script — copy the Resend sender from `api/index.ts` — and for a daily puzzle game with
+a leaderboard one process and one file will still carry you a long way.
