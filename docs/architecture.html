@@ -307,7 +307,7 @@ ink. Both were fixed in the derivation, not in the test.</p>
 
 <table>
   <tr><th>host</th><th>changes needed</th><th>why</th></tr>
-  <tr><td>Fly · Railway · Render</td><td>none</td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
+  <tr><td>Fly · Railway · Render</td><td>wire email into <code>scripts/serve.mjs</code>; in production it also requires <code>DATABASE_URL</code> and <code>ALLOWED_ORIGINS</code></td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
   <tr><td>Vercel</td><td>set <code>DATABASE_URL</code> to a hosted Postgres</td><td>no persistent disk, no memory between requests</td></tr>
   <tr><td>Static only</td><td>none</td><td>the client already falls back to local play when no server answers</td></tr>
 </table>
