@@ -54,6 +54,9 @@ export interface Store {
   createPlay(p: NewPlay): Promise<PlayRow>;
   play(id: string): Promise<PlayRow | undefined>;
   updatePlay(id: string, patch: Partial<PlayRow>): Promise<void>;
+  /** The earliest-started ranked play this user has on this edition, finished or not.
+   *  That play, and only that play, can put a result on the board. */
+  firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined>;
   recordResult(r: ResultRow): Promise<'recorded' | 'already-ranked'>;
   resultFor(editionId: string, userId: string): Promise<ResultRow | undefined>;
   board(editionId: string, limit: number): Promise<(ResultRow & { display_name: string })[]>;
@@ -252,6 +255,11 @@ export class SqliteStore implements Store {
     const set = keys.map((k) => `${k} = ?`).join(', ');
     this.db.prepare(`UPDATE plays SET ${set} WHERE id = ?`)
       .run(...keys.map((k) => (patch as any)[k]), id);
+  }
+
+  async firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined> {
+    return this.db.prepare(`SELECT * FROM plays WHERE user_id = ? AND edition_id = ? AND ranked = 1
+      ORDER BY started_at ASC, id ASC LIMIT 1`).get(userId, editionId) as PlayRow | undefined;
   }
 
   /* ---------- results ---------- */

@@ -193,6 +193,11 @@ export class PostgresStore implements Store {
       [...keys.map((k) => (patch as any)[k]), id]);
   }
 
+  async firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined> {
+    return playRow(await this.one(`SELECT * FROM plays WHERE user_id = $1 AND edition_id = $2 AND ranked = 1
+      ORDER BY started_at ASC, id ASC LIMIT 1`, [userId, editionId]));
+  }
+
   /* ---------- results ---------- */
 
   async recordResult(r: ResultRow): Promise<'recorded' | 'already-ranked'> {

@@ -44,9 +44,12 @@ const userOf = async (srv: GameServer, token: string) => (await srv.store.userFo
 
 /** Play a board the way an honest client does: deduce locally from the clues it has been
  *  given, ask the server to confirm each flip, and fold in whatever clues come back. */
-async function playHonestly(srv: GameServer, token: string, playId: string, view: any, tickMs = 1000, clk?: ReturnType<typeof clock>) {
+async function playHonestly(srv: GameServer, token: string, playId: string, view: any, tickMs = 1000, clk?: ReturnType<typeof clock>,
+  resume?: { moves: { c: number; s: State }[] }) {
   const user = await userOf(srv, token);
   const session = new Session({ puzzle: view, now: () => 0 });
+  // a resumed run: the server already holds these moves, so the client replays them first
+  for (const m of resume?.moves ?? []) session.mark(m.c, m.s);
   let last: any = null;
   for (let i = 0; i < 200; i++) {
     if (session.solved) break;
@@ -213,6 +216,72 @@ test('free play is never ranked, and a re-solve never re-ranks', async () => {
   const board = await srv.board(first.edition.id, u);
   assert.equal(board.entries.length, 1);
   assert.equal(board.entries[0].score, firstScore, 'the original result stands');
+});
+
+test('a ranked board ranks the first play STARTED: restarting resumes it, mistakes and clock kept', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'scout@b.co');
+  const u = await userOf(srv, token);
+
+  // open the board, get one square right and one wrong, then walk away
+  const first = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  const local = new Session({ puzzle: first.view, now: () => 0 });
+  const d = local.deduction();
+  const cell = bits(d.forcedA | d.forcedB)[0];
+  const truth: State = ((d.forcedB >> cell) & 1) ? 1 : 0;
+  clk.advance(1000);
+  assert.equal((await srv.move(u, { playId: first.playId, cell, state: (truth ? 0 : 1) as State })).outcome, 'wrong');
+  const ok = await srv.move(u, { playId: first.playId, cell, state: truth });
+  assert.equal(ok.outcome, 'ok');
+  clk.advance(10 * 60_000);
+
+  // "start again" — the scouting run must not be traded for a clean one
+  const again = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  assert.equal(again.playId, first.playId, 'the ranked attempt already under way is resumed');
+  assert.ok(again.resume, 'and the client is told so');
+  assert.equal(again.resume!.mistakes, 1);
+  assert.deepEqual(again.resume!.moves, [{ c: cell, s: truth }]);
+  assert.ok(again.resume!.elapsedMs >= 10 * 60_000, 'the clock did not stop while they were away');
+  for (const c of ok.unlocked) {
+    assert.ok(again.view.clues.some((x) => x.id === c.id), 'clues the moves unlocked come back with the view');
+  }
+
+  const { last } = await playHonestly(srv, token, again.playId, again.view, 1000, clk, again.resume);
+  assert.equal(last.result.ranked, true);
+  assert.equal(last.result.mistakes, 1, 'the mistake from the first sitting counts');
+  assert.equal(last.result.perfect, false);
+  assert.ok(last.result.timeMs >= 10 * 60_000, 'timed from the first start');
+  const board = await srv.board(first.edition.id, u);
+  assert.equal(board.entries.length, 1);
+  assert.equal(board.entries[0].mistakes, 1);
+
+  // and once finished, another start is practice with a fresh play
+  const replay = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  assert.notEqual(replay.playId, first.playId);
+  assert.equal(replay.resume, undefined);
+  assert.ok(replay.previousResult);
+  assert.equal((await srv.store.play(replay.playId))!.ranked, 0, 'a replay is stored as practice');
+});
+
+test('a second ranked play on the same edition can never rank, even if two starts race', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'race@b.co');
+  const u = await userOf(srv, token);
+  const first = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  const row = (await srv.store.play(first.playId))!;
+  // what a racing second start would have written
+  await srv.store.createPlay({
+    id: 'ply_racer', user_id: u.id, edition_id: row.edition_id, week_id: row.week_id,
+    theme_id: row.theme_id, difficulty: row.difficulty, seed: row.seed, ranked: 1,
+    iso_date: row.iso_date, started_at: row.started_at + 1,
+  });
+  const late = await playHonestly(srv, token, 'ply_racer', first.view, 100, clk);
+  assert.equal(late.last.result.ranked, false, 'only the first play started may rank');
+  assert.equal((await srv.board(first.edition.id, u)).entries.length, 0);
+  const real = await playHonestly(srv, token, first.playId, first.view, 1000, clk);
+  assert.equal(real.last.result.ranked, true);
 });
 
 test('move flooding is rate limited', async () => {

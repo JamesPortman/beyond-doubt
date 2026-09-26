@@ -338,24 +338,52 @@ export class GameServer {
     return { token, user: { id: user.id, displayName: user.display_name, email: user.email } };
   }
 
+  /** One ranked attempt per player per edition, and it is the first one STARTED, not the
+   *  first one finished. Otherwise a player could open the board, read the clues, make
+   *  their mistakes, walk away and start a clean run knowing the answer — and the clean run
+   *  would be the one recorded. So starting a ranked board you are part-way through
+   *  resumes that play, clock and mistakes included; starting one you have finished is
+   *  practice. A reload, a second device or a room all land on the same attempt. */
   async start(user: UserRow, b: P.StartBody): Promise<P.StartResult> {
     const { ref, ranked } = await this.refFor(b);
     const puzzle = this.puzzleFor(ref);
+    const first = ranked ? await this.store.firstRankedPlay(user.id, ref.id) : undefined;
+    const prior = await this.store.resultFor(ref.id, user.id);
+    const edition: P.EditionInfo = {
+      id: ref.id, kind: ref.kind === 'weekly' ? 'weekly' : ref.kind === 'daily' ? 'daily' : 'free',
+      themeId: ref.themeId, difficulty: ref.difficulty,
+      date: ref.date, weekId: ref.weekId, dayIndex: ref.dayIndex, ranked,
+    };
+
+    if (first && first.status === 'open' && !prior) {
+      const { session } = await this.sessionFor(first.id);
+      return {
+        playId: first.id,
+        edition,
+        view: this.viewOf(puzzle, session.activeClues()),
+        serverNow: this.now(),
+        hintBudget: this.opts.hintBudget,
+        previousResult: null,
+        resume: {
+          moves: JSON.parse(first.moves) as { c: number; s: State }[],
+          mistakes: first.mistakes, hintsUsed: first.hints,
+          elapsedMs: this.now() - first.started_at,
+        },
+      };
+    }
+
     const playId = newId('ply');
     await this.store.createPlay({
       id: playId, user_id: user.id, edition_id: ref.id, week_id: ref.weekId ?? null,
-      theme_id: ref.themeId, difficulty: ref.difficulty, seed: ref.seed, ranked: ranked ? 1 : 0,
+      theme_id: ref.themeId, difficulty: ref.difficulty, seed: ref.seed,
+      // a replay of a board already attempted is practice, whatever the edition is
+      ranked: ranked && !first && !prior ? 1 : 0,
       iso_date: ref.date ?? null,
       started_at: this.now(),
     });
-    const prior = await this.store.resultFor(ref.id, user.id);
     return {
       playId,
-      edition: {
-        id: ref.id, kind: ref.kind === 'weekly' ? 'weekly' : ref.kind === 'daily' ? 'daily' : 'free',
-        themeId: ref.themeId, difficulty: ref.difficulty,
-        date: ref.date, weekId: ref.weekId, dayIndex: ref.dayIndex, ranked,
-      },
+      edition,
       view: this.viewOf(puzzle, puzzle.clues.filter((c) => c.gate === null)),
       serverNow: this.now(),
       hintBudget: this.opts.hintBudget,
@@ -412,7 +440,9 @@ export class GameServer {
       // member the day it represents, and for free play nothing at all
       const playedDate = row.iso_date;
       let ranked = false;
-      if (row.ranked) {
+      // Only the first ranked play started on this edition may rank. start() never opens a
+      // second one, but two racing starts could; this is the check that settles it.
+      if (row.ranked && (await this.store.firstRankedPlay(user.id, row.edition_id))?.id === row.id) {
         const outcome = await this.store.recordResult({
           edition_id: row.edition_id, week_id: row.week_id, user_id: user.id, theme_id: row.theme_id,
           time_ms: elapsed, hints: session.hintsUsed, mistakes: session.mistakes,
@@ -500,6 +530,7 @@ export class GameServer {
       edition: start.edition, view: start.view,
       serverNow: now, hintBudget: start.hintBudget,
       players: await this.presence(room.id, user.id),
+      resume: start.resume,
     };
   }
 

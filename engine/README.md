@@ -196,8 +196,14 @@ ranked board without the secret rather than fall back. The browser builds only p
 split play and the offline fallback included — because a board built in the page carries its
 whole solution.
 
-**The first completed attempt is the ranked one.** Replaying a board you have solved is
-practice; it cannot improve your placement. Free play is never ranked at all.
+**The first attempt *started* is the ranked one.** Not the first finished: otherwise you
+could open the board, make your mistakes, walk away and start a clean run knowing the answer.
+So starting a ranked board you are part-way through *resumes* that play — its moves, its
+mistakes, its hints and its clock, which kept running while you were away — whether you
+reloaded, switched device or joined a room. (`start` returns it with a `resume` block; the
+client replays the moves.) Replaying a board you have finished is practice and cannot
+improve your placement, and if two starts ever race, only the earlier play can record a
+result. Free play is never ranked at all.
 
 Also enforced server-side: hints and mistakes are counted and persisted (a hinted run is not
 "perfect"), moves on someone else's play are rejected, out-of-range cells are rejected, move

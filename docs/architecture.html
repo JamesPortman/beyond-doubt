@@ -226,7 +226,8 @@ per tap.</p>
   <tr><td>Read the solution out of devtools</td><td>It was never sent. Nor was the seed that would regenerate it. A test greps the serialised response.</td></tr>
   <tr><td>Report a fake time</td><td>There is no field for it. The clock runs server-side from <code>start</code> to the final flip.</td></tr>
   <tr><td>Play an easier weekday</td><td>The client sends a mode. The server derives the edition from its own calendar.</td></tr>
-  <tr><td>Grind a board, then replay it fast</td><td>The first completed attempt is the ranked one. Later runs are practice.</td></tr>
+  <tr><td>Grind a board, then replay it fast</td><td>The first attempt <i>started</i> is the ranked one. Later runs are practice.</td></tr>
+  <tr><td>Scout the board, abandon it, restart clean</td><td>Starting a ranked board you are part-way through resumes that play, mistakes and clock included. Only the first play started can record a result.</td></tr>
   <tr><td>Solve offline, then submit</td><td>Free play is never ranked, and there is no submit endpoint.</td></tr>
   <tr><td>Flood moves</td><td>Rate limited from <code>plays.last_move_at</code> — the database, not a process-local map.</td></tr>
 </table>
