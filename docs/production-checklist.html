@@ -72,14 +72,17 @@ things that need you, not more code.</p>
   <h3><span class="tick">✓</span> Login codes stop leaking in production <span class="who me">done</span></h3>
   <p><code>authRequest</code> returned the six-digit code in the response body — correct for
   development, an account-takeover hole in production. There is now a <code>sendEmail</code>
-  hook; with <code>NODE_ENV=production</code> the code goes to the hook and the response
-  carries nothing. Tested both ways.</p>
+  hook, and dev mode is now an explicit opt-in (<code>BD_DEV=1</code>, never with
+  <code>NODE_ENV=production</code> or on a Vercel deployment) rather than "anything that is not
+  production", so the code goes to the hook and the response carries nothing unless someone
+  deliberately asked for dev. Tested both ways.</p>
 </div>
 
 <div class="item done">
   <h3><span class="tick">✓</span> Refuses to boot misconfigured <span class="who me">done</span></h3>
-  <p>In production the server exits rather than starting without <code>DATABASE_URL</code> and
-  <code>ALLOWED_ORIGINS</code>. The failure mode this prevents is the quiet one: booting on
+  <p>In production the server exits rather than starting without <code>DATABASE_URL</code>,
+  <code>ALLOWED_ORIGINS</code> and <code>EDITION_SECRET</code> (the Vercel function requires
+  <code>DATABASE_URL</code> and <code>EDITION_SECRET</code>). The failure mode this prevents is the quiet one: booting on
   SQLite in <code>/tmp</code>, appearing to work, and losing every account on the next deploy.</p>
 </div>
 

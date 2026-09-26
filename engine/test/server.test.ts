@@ -1,7 +1,7 @@
 import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameServer, bands, isoLaunch, SECRET_SEEDS_FROM } from '../src/net/server.js';
+import { GameServer, bands, isoLaunch, SECRET_SEEDS_FROM, devModeFromEnv } from '../src/net/server.js';
 import { isoDate, civilDate, GAME_TZ, shiftDays } from '../src/core/edition.js';
 import { streakStats } from '../src/core/streak.js';
 import { Session } from '../src/core/session.js';
@@ -16,7 +16,10 @@ import '../src/themes/all.js';
 const PG = process.env.CLUES_PG;
 let schemaSeq = 0;
 
+/** Tests sign in with the code dev mode hands back, so they ask for dev explicitly —
+ *  a GameServer on its own defaults to production behaviour. */
 async function makeServer(opts: ConstructorParameters<typeof GameServer>[0] = {}): Promise<GameServer> {
+  opts = { dev: true, ...opts };
   if (!PG) return new GameServer(opts);
   const { Pool } = await import('pg');
   const { PostgresStore } = await import('../src/net/store-pg.js');
@@ -561,6 +564,25 @@ test('production refuses to leak login codes and locks down CORS', async () => {
     'an unlisted origin gets no CORS grant at all');
   assert.equal(headers()['x-content-type-options'], 'nosniff');
   assert.equal(headers()['x-frame-options'], 'DENY');
+});
+
+test('dev mode is opt-in, and never on a deployment however it is asked for', async () => {
+  assert.equal(devModeFromEnv({}), false, 'no flag, no dev — even with NODE_ENV unset');
+  assert.equal(devModeFromEnv({ NODE_ENV: 'development' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1' }), true);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', NODE_ENV: 'production' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'production' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'preview' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'development' }), true, 'vercel dev is local');
+
+  // and a GameServer given no opinion behaves like production
+  const srv = new GameServer({ now: () => new Date('2026-08-20T12:00:00Z').getTime() });
+  await assert.rejects(srv.authRequest({ email: 'a@b.co' }), /no sendEmail/,
+    'with nowhere to send a code it fails, and never hands the code back');
+  const out: Record<string, string> = {};
+  const res = { setHeader: (k: string, v: string) => { out[k.toLowerCase()] = v; }, writeHead() { return res; }, end() {} } as any;
+  await srv.handler({ method: 'OPTIONS', url: '/api/today', headers: { origin: 'https://evil.example' } } as any, res);
+  assert.equal(out['access-control-allow-origin'], undefined, 'no wildcard CORS by default');
 });
 
 test('health checks the things that actually break', async () => {

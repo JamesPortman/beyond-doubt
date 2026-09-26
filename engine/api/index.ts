@@ -3,7 +3,7 @@
  *  the rules to keep in sync. */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
-import { GameServer } from '../src/net/server.js';
+import { GameServer, devModeFromEnv } from '../src/net/server.js';
 import { PostgresStore } from '../src/net/store-pg.js';
 
 const CONNECTION = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
@@ -12,6 +12,16 @@ if (!CONNECTION) {
   // Failing loudly at cold start beats silently writing accounts to /tmp, which is
   // per-instance and wiped without warning.
   throw new Error('DATABASE_URL is required — serverless has no persistent disk');
+}
+
+// Never dev on a deployment: devModeFromEnv needs BD_DEV=1 and refuses Vercel's production
+// and preview environments whatever else is set.
+const DEV = devModeFromEnv(process.env);
+
+if (!DEV && !process.env.EDITION_SECRET) {
+  // Without it every ranked board answers 503. Better to fail the deploy's first request
+  // loudly than to ship a game whose daily cannot be played.
+  throw new Error('EDITION_SECRET is required — ranked boards are keyed with it');
 }
 
 // One pool per warm instance; `max: 2` because a serverless platform runs many of them
@@ -45,7 +55,7 @@ async function sendEmail(to: string, subject: string, body: string): Promise<voi
 
 const server = new GameServer({
   store,
-  dev: process.env.NODE_ENV !== 'production',
+  dev: DEV,
   allowedOrigins: (process.env.ALLOWED_ORIGINS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
   sendEmail,
   // Leave ADMIN_TOKEN unset and /api/admin/* answers 404 like any unknown path: no admin

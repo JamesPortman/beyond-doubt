@@ -308,7 +308,7 @@ ink. Both were fixed in the derivation, not in the test.</p>
 
 <table>
   <tr><th>host</th><th>changes needed</th><th>why</th></tr>
-  <tr><td>Fly · Railway · Render</td><td>wire email into <code>scripts/serve.mjs</code>; in production it also requires <code>DATABASE_URL</code> and <code>ALLOWED_ORIGINS</code></td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
+  <tr><td>Fly · Railway · Render</td><td>wire email into <code>scripts/serve.mjs</code>; in production it also requires <code>DATABASE_URL</code>, <code>ALLOWED_ORIGINS</code> and <code>EDITION_SECRET</code></td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
   <tr><td>Vercel</td><td>set <code>DATABASE_URL</code> to a hosted Postgres</td><td>no persistent disk, no memory between requests</td></tr>
   <tr><td>Static only</td><td>none</td><td>the client already falls back to local play when no server answers</td></tr>
 </table>
@@ -323,7 +323,10 @@ and hint counts match the database row), and <b>rate limiting reads the database
 <code>api/index.ts</code>, which runs the same <code>GameServer</code> as
 <code>npm run serve</code> over <code>PostgresStore</code> (<code>src/net/store-pg.ts</code>).
 It migrates on cold start, refuses to start without <code>DATABASE_URL</code> (or
-<code>POSTGRES_URL</code>), and delivers sign-in codes through Resend. <code>npm run test:pg</code>
+<code>POSTGRES_URL</code>) or <code>EDITION_SECRET</code>, and delivers sign-in codes through
+Resend. Dev mode — codes in the response, any CORS origin, a public seed key — is an explicit
+opt-in (<code>BD_DEV=1</code>, which <code>npm run serve</code> passes) and is refused under
+<code>NODE_ENV=production</code> and on Vercel production and preview deployments. <code>npm run test:pg</code>
 runs the whole server suite against Postgres, so both stores answer to the same tests.
 Operator feature flags (<code>src/net/flags.ts</code>) are enforced server-side and sit
 behind their own <code>ADMIN_TOKEN</code>; unset, <code>/api/admin/*</code> does not exist.</p>

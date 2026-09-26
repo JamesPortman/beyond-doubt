@@ -24,7 +24,9 @@ export interface ServerOptions {
    *  board at a time. Must be YYYY-MM-DD — the comparisons are string comparisons, so an
    *  unpadded month would fail silently and in a way nobody would think to look for. */
   launchDate?: string;
-  /** dev returns the login code in the response instead of emailing it */
+  /** dev returns the login code in the response instead of emailing it, allows any CORS
+   *  origin, and keys ranked seeds with a public placeholder. Off unless asked for — a
+   *  forgotten environment variable must never be what turns it on. See devModeFromEnv. */
   dev?: boolean;
   /** Keys the seeds of ranked boards dated SECRET_SEEDS_FROM or later (EDITION_SECRET).
    *  Production MUST set it: without it those boards refuse to start, rather than fall
@@ -63,6 +65,17 @@ const FLAGS_TTL_MS = 5_000;
 const SIGNIN_WINDOW_MS = 15 * 60_000;
 const SIGNIN_PER_IP = 12;
 const SIGNIN_PER_EMAIL = 5;
+
+/** Dev mode is an explicit opt-in (`BD_DEV=1`), and even then never on a real deployment:
+ *  not with NODE_ENV=production, and not on any Vercel environment but `vercel dev`. It used
+ *  to be "anything that is not NODE_ENV=production", which failed open — one missing variable
+ *  and sign-in codes came back in the response to whoever asked for them. */
+export function devModeFromEnv(env: Record<string, string | undefined>): boolean {
+  if (env.BD_DEV !== '1') return false;
+  if (env.NODE_ENV === 'production') return false;
+  if (env.VERCEL_ENV && env.VERCEL_ENV !== 'development') return false;
+  return true;
+}
 
 /** Until someone chooses one, the game has always existed since the day it is asked. */
 /** A launch date only works as a plain ISO day, because every check against it is a string
@@ -116,13 +129,16 @@ export class GameServer {
     const timezone = o.timezone ?? GAME_TZ;
     this.opts = {
       dbPath: o.dbPath ?? ':memory:',
-      dev: o.dev ?? true,
+      dev: o.dev ?? false,
       now,
       hintBudget: o.hintBudget ?? HINT_BUDGET,
       minMoveIntervalMs: o.minMoveIntervalMs ?? 40,
       launchDate: isoLaunch(o.launchDate, now(), timezone),
-      allowedOrigins: o.allowedOrigins ?? (o.dev === false ? [] : ['*']),
-      sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
+      allowedOrigins: o.allowedOrigins ?? (o.dev ? ['*'] : []),
+      sendEmail: o.sendEmail ?? (o.dev
+        ? async () => { /* dev: the code comes back in the response */ }
+        // not dev and nowhere to send the code: fail the request rather than report "sent"
+        : async () => { throw new Error('no sendEmail configured — cannot deliver sign-in codes'); }),
       timezone,
       adminToken: o.adminToken ?? '',
       editionSecret: o.editionSecret ?? '',
