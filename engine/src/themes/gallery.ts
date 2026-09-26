@@ -2,35 +2,45 @@ import { Theme } from './index.js';
 import { currentBase } from '../base.js';
 import { noun, pred, predInv } from '../i18n/index.js';
 
-/** The twenty-one works in the set, in filename order.
+/** The works in the set, in filename order, mirroring the visible catalogue on
+ *  georgianartist.com — `id` is that site's product id, so a work can be traced back
+ *  to the listing its picture came from when the catalogue next moves.
  *
  *  `title` is deliberately short: it is what the tile prints AND what a clue says when it
  *  names a work, so "Blue Mountain Sunrise", "Blue Mountain Sunset" and "Blue Mountain
  *  Trail" would all arrive on the board as "BLUE M…" and the puzzle would be unsolvable
  *  for reasons that have nothing to do with the puzzle. The full title survives in
- *  `full`, which Inspect shows the way a wall label does. */
-const WORKS: { title: string; full: string; oil: boolean }[] = [
-  { title: 'Council Beach', full: 'Council Beach', oil: true },
-  { title: 'Lora Bay', full: 'Lora Bay', oil: true },
-  { title: 'Bruce Trail', full: 'Bruce Trail', oil: true },
-  { title: 'Access Point', full: 'Access Point', oil: true },
-  { title: 'Alpine', full: 'Alpine Ski Club', oil: true },
-  { title: 'Inglis Falls', full: 'Inglis Falls', oil: true },
-  { title: 'Manitoulin', full: 'Manitoulin Island', oil: true },
-  { title: 'Canola', full: 'Ravenna Canola', oil: true },
-  { title: 'Ravenna', full: 'Ravenna Sunset', oil: true },
-  { title: 'Singhampton', full: 'Singhampton', oil: true },
-  { title: 'Northwinds', full: 'Northwinds', oil: true },
-  { title: 'Sunrise', full: 'Blue Mountain Sunrise', oil: false },
-  { title: 'Sunset', full: 'Blue Mountain Sunset', oil: false },
-  { title: 'The Trail', full: 'Blue Mountain Trail', oil: false },
-  { title: 'Bridal Veil', full: 'Bridal Veil Falls', oil: false },
-  { title: 'Delphi Point', full: 'Delphi Point', oil: false },
-  { title: 'Local Farm', full: 'Local Farm', oil: false },
-  { title: 'Scenic Caves', full: 'Scenic Caves', oil: true },
-  { title: 'Snowy Owl', full: 'Snowy Owl, Craigleith', oil: false },
-  { title: 'The Grotto', full: 'The Grotto', oil: false },
-  { title: 'The Summit', full: 'Top of Blue Mountain', oil: false },
+ *  `full`, which Inspect shows the way a wall label does.
+ *
+ *  One thing the set deliberately does NOT mirror: the site lists "Autumn Canopy" and
+ *  "Top of Blue Mountain" as two photographs of the same picture. Two tiles showing the
+ *  same image under different names is the one thing a board that labels by title cannot
+ *  survive, so only "Top of Blue Mountain" is here. */
+const WORKS: { title: string; full: string; oil: boolean; id: string }[] = [
+  { title: 'Council Beach', full: 'Council Beach', oil: true, id: 'council-beach' },
+  { title: 'Lora Bay', full: 'Lora Bay', oil: true, id: 'lora-bay' },
+  { title: 'Bruce Trail', full: 'Bruce Trail in the Grey Highlands', oil: true, id: 'bruce-trail' },
+  { title: 'Epping', full: 'Bruce Trail at Epping', oil: true, id: 'bruce-trail-epping' },
+  { title: 'Access Point', full: 'Beaver River: Access Point 2', oil: true, id: 'beaver-river-access' },
+  { title: 'Alpine', full: 'Alpine Ski Club: Fall', oil: true, id: 'alpine-ski-fall' },
+  { title: 'Inglis Falls', full: 'Inglis Falls, Owen Sound', oil: true, id: 'inglis-falls' },
+  { title: 'Manitoulin', full: 'Manitoulin Island', oil: true, id: 'manitoulin-island' },
+  { title: 'Killarney', full: 'Near Killarney', oil: true, id: 'near-killarney' },
+  { title: 'Peasemarsh', full: 'Peasemarsh', oil: true, id: 'peasemarsh' },
+  { title: 'Canola', full: 'Ravenna Canola', oil: true, id: 'ravenna-canola-painting' },
+  { title: 'Scenic Caves', full: 'Scenic Caves', oil: true, id: 'scenic-caves' },
+  { title: 'Singhampton', full: 'Singhampton', oil: true, id: 'singhampton' },
+  { title: 'Northwinds', full: 'Northwinds Beach', oil: true, id: 'northwinds-beach' },
+  { title: 'Sunrise', full: 'Blue Mountain Sunrise', oil: false, id: 'blue-mountain-sunrise' },
+  { title: 'Sunset', full: 'Blue Mountain Sunset', oil: false, id: 'blue-mountain-sunset-2' },
+  { title: 'The Trail', full: 'Blue Mountain Trail', oil: false, id: 'blue-mountain-trail' },
+  { title: 'Bridal Veil', full: 'Bridal Veil Falls', oil: false, id: 'bridal-veil-falls' },
+  { title: 'Delphi Point', full: 'Delphi Point', oil: false, id: 'delphi-point' },
+  { title: 'Local Farm', full: 'Local Farm', oil: false, id: 'local-farm' },
+  { title: 'Snowy Owl', full: 'Snowy Owl in Craigleith', oil: false, id: 'snowy-owl-in-craigleith' },
+  { title: 'The Grotto', full: 'The Grotto', oil: false, id: 'the-grotto' },
+  { title: 'The Summit', full: 'Top of Blue Mountain', oil: false, id: 'top-of-blue-mountain-photo' },
+  { title: 'Twilight', full: 'Northwinds Beach Twilight', oil: false, id: 'northwinds-beach-twilight' },
 ];
 
 export const gallery: Theme = {
