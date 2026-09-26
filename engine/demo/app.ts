@@ -5,7 +5,7 @@ import {
   scoreRun, formatDuration,
   dailyEdition, weeklyEdition, freeEdition, buildPuzzle, EditionRef, isoDate,
   LocalLeaderboard, entryFrom, makeRng,
-  Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay, PublicFlags,
+  Api, ApiError, defaultApiBase, EditionInfo, PlayMode, RunResult, RoomPlayer, ArchiveDay, PublicFlags, ResumeState,
   tileArt, ART_DEFS,
   Settings, loadSettings, saveSettings, DEFAULT_SETTINGS, cssVars,
   termsForClue, TermId, dealFor, resultGrid, shareText,
@@ -186,6 +186,7 @@ class App {
     this.playId = null; this.previousResult = null;
     this.activePlayer = 0; this.highlight = 0;
     this.hintedCells.clear();
+    let resumedMs = 0;
 
     if (this.beat) { clearInterval(this.beat); this.beat = null; }
     if (this.prefs.mode !== 'room') { this.roomId = null; this.roomCode = null; this.players = []; }
@@ -209,6 +210,7 @@ class App {
           this.roomId = res.roomId; this.roomCode = res.code; this.players = res.players;
           this.playId = res.playId; this.edition = res.edition;
           this.session = new Session({ puzzle: res.view, hintBudget: res.hintBudget, now: () => 0 });
+          resumedMs = this.resume(res.resume);
           this.prefs.themeId = res.edition.themeId;
           this.theme = getTheme(this.prefs.themeId);
           // presence is a poll, not a socket: one small request every few seconds is
@@ -236,6 +238,7 @@ class App {
         this.session = new Session({ puzzle: res.view, hintBudget: res.hintBudget, now: () => 0 });
         this.previousResult = res.previousResult;
         this.shareSeed = res.shareSeed ?? null;
+        resumedMs = this.resume(res.resume);
         if (res.previousResult) this.toast(this.replayNotice(res.previousResult), 'warn');
       } catch (e) {
         this.online = false;
@@ -247,12 +250,25 @@ class App {
     this.pencils = new Array(this.session.puzzle.n).fill(0);
     this.doneClues.clear();
     this.inspectClue = null; this.inspectCell = null;
-    this.startedWall = Date.now();
+    this.startedWall = Date.now() - resumedMs;
     if (this.tick) clearInterval(this.tick);
     this.tick = setInterval(() => this.paintStatus(), 500) as unknown as number;
     this.busy = false;
     this.applySkin();
     this.render();
+  }
+
+  /** A ranked board is ranked on the first play started, so the server hands back a run
+   *  already under way rather than a clean one. Replay its moves onto the fresh session —
+   *  the view already carries every clue they unlocked — and take the server's counts.
+   *  Returns how long the run has been going, because its clock never stopped. */
+  private resume(r: ResumeState | undefined): number {
+    if (!r) return 0;
+    for (const m of r.moves) this.session.mark(m.c, m.s);
+    this.mistakes = r.mistakes;
+    this.hintsUsed = r.hintsUsed;
+    this.toast(this.ui.resumed, 'warn');
+    return r.elapsedMs;
   }
 
   /** Only practice boards are built in the browser. A ranked board's seed is keyed on the

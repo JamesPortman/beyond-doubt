@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: unit, fuzz, typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run fuzz
+      - run: npm run typecheck:demo
+
+  postgres:
+    name: server suite on Postgres
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: devpw
+          POSTGRES_DB: clues
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      # test:pg points CLUES_PG at $DATABASE_URL, defaulting to exactly this service
+      - run: npm run test:pg
+        env:
+          DATABASE_URL: postgres://postgres:devpw@127.0.0.1:5432/clues
+
+  e2e:
+    name: browser end-to-end
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      # deliberately not in package.json — see "End-to-end checks" in engine/README.md
+      - run: npm i --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e

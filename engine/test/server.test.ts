@@ -1,7 +1,7 @@
 import { THEMES } from '../src/themes/all.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameServer, bands, isoLaunch, SECRET_SEEDS_FROM } from '../src/net/server.js';
+import { GameServer, bands, isoLaunch, SECRET_SEEDS_FROM, devModeFromEnv } from '../src/net/server.js';
 import { isoDate, civilDate, GAME_TZ, shiftDays } from '../src/core/edition.js';
 import { streakStats } from '../src/core/streak.js';
 import { Session } from '../src/core/session.js';
@@ -16,7 +16,10 @@ import '../src/themes/all.js';
 const PG = process.env.CLUES_PG;
 let schemaSeq = 0;
 
+/** Tests sign in with the code dev mode hands back, so they ask for dev explicitly —
+ *  a GameServer on its own defaults to production behaviour. */
 async function makeServer(opts: ConstructorParameters<typeof GameServer>[0] = {}): Promise<GameServer> {
+  opts = { dev: true, ...opts };
   if (!PG) return new GameServer(opts);
   const { Pool } = await import('pg');
   const { PostgresStore } = await import('../src/net/store-pg.js');
@@ -44,9 +47,12 @@ const userOf = async (srv: GameServer, token: string) => (await srv.store.userFo
 
 /** Play a board the way an honest client does: deduce locally from the clues it has been
  *  given, ask the server to confirm each flip, and fold in whatever clues come back. */
-async function playHonestly(srv: GameServer, token: string, playId: string, view: any, tickMs = 1000, clk?: ReturnType<typeof clock>) {
+async function playHonestly(srv: GameServer, token: string, playId: string, view: any, tickMs = 1000, clk?: ReturnType<typeof clock>,
+  resume?: { moves: { c: number; s: State }[] }) {
   const user = await userOf(srv, token);
   const session = new Session({ puzzle: view, now: () => 0 });
+  // a resumed run: the server already holds these moves, so the client replays them first
+  for (const m of resume?.moves ?? []) session.mark(m.c, m.s);
   let last: any = null;
   for (let i = 0; i < 200; i++) {
     if (session.solved) break;
@@ -213,6 +219,104 @@ test('free play is never ranked, and a re-solve never re-ranks', async () => {
   const board = await srv.board(first.edition.id, u);
   assert.equal(board.entries.length, 1);
   assert.equal(board.entries[0].score, firstScore, 'the original result stands');
+});
+
+test('a ranked board ranks the first play STARTED: restarting resumes it, mistakes and clock kept', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'scout@b.co');
+  const u = await userOf(srv, token);
+
+  // open the board, get one square right and one wrong, then walk away
+  const first = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  const local = new Session({ puzzle: first.view, now: () => 0 });
+  const d = local.deduction();
+  const cell = bits(d.forcedA | d.forcedB)[0];
+  const truth: State = ((d.forcedB >> cell) & 1) ? 1 : 0;
+  clk.advance(1000);
+  assert.equal((await srv.move(u, { playId: first.playId, cell, state: (truth ? 0 : 1) as State })).outcome, 'wrong');
+  const ok = await srv.move(u, { playId: first.playId, cell, state: truth });
+  assert.equal(ok.outcome, 'ok');
+  clk.advance(10 * 60_000);
+
+  // "start again" — the scouting run must not be traded for a clean one
+  const again = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  assert.equal(again.playId, first.playId, 'the ranked attempt already under way is resumed');
+  assert.ok(again.resume, 'and the client is told so');
+  assert.equal(again.resume!.mistakes, 1);
+  assert.deepEqual(again.resume!.moves, [{ c: cell, s: truth }]);
+  assert.ok(again.resume!.elapsedMs >= 10 * 60_000, 'the clock did not stop while they were away');
+  for (const c of ok.unlocked) {
+    assert.ok(again.view.clues.some((x) => x.id === c.id), 'clues the moves unlocked come back with the view');
+  }
+
+  const { last } = await playHonestly(srv, token, again.playId, again.view, 1000, clk, again.resume);
+  assert.equal(last.result.ranked, true);
+  assert.equal(last.result.mistakes, 1, 'the mistake from the first sitting counts');
+  assert.equal(last.result.perfect, false);
+  assert.ok(last.result.timeMs >= 10 * 60_000, 'timed from the first start');
+  const board = await srv.board(first.edition.id, u);
+  assert.equal(board.entries.length, 1);
+  assert.equal(board.entries[0].mistakes, 1);
+
+  // and once finished, another start is practice with a fresh play
+  const replay = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  assert.notEqual(replay.playId, first.playId);
+  assert.equal(replay.resume, undefined);
+  assert.ok(replay.previousResult);
+  assert.equal((await srv.store.play(replay.playId))!.ranked, 0, 'a replay is stored as practice');
+});
+
+test('a second ranked play on the same edition can never rank, even if two starts race', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const { token } = await signIn(srv, 'race@b.co');
+  const u = await userOf(srv, token);
+  const first = await srv.start(u, { mode: 'daily', themeId: 'orchard' });
+  const row = (await srv.store.play(first.playId))!;
+  // what a racing second start would have written
+  await srv.store.createPlay({
+    id: 'ply_racer', user_id: u.id, edition_id: row.edition_id, week_id: row.week_id,
+    theme_id: row.theme_id, difficulty: row.difficulty, seed: row.seed, ranked: 1,
+    iso_date: row.iso_date, started_at: row.started_at + 1,
+  });
+  const late = await playHonestly(srv, token, 'ply_racer', first.view, 100, clk);
+  assert.equal(late.last.result.ranked, false, 'only the first play started may rank');
+  assert.equal((await srv.board(first.edition.id, u)).entries.length, 0);
+  const real = await playHonestly(srv, token, first.playId, first.view, 1000, clk);
+  assert.equal(real.last.result.ranked, true);
+});
+
+test('a move on one instance cannot erase a mistake or hint recorded by another', async () => {
+  // Two serverless instances over one database, each with its own in-memory cache.
+  const clk = clock('2026-08-20T12:00:00Z');
+  const a = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const b = new GameServer({ store: a.store, now: clk.now, minMoveIntervalMs: 0, dev: true });
+  const { token } = await signIn(a, 'split@b.co');
+  const u = await userOf(a, token);
+  const start = await a.start(u, { mode: 'daily', themeId: 'orchard' });
+  const local = new Session({ puzzle: start.view, now: () => 0 });
+  const next = () => {
+    const d = local.deduction();
+    const cell = bits(d.forcedA | d.forcedB)[0];
+    return { cell, truth: (((d.forcedB >> cell) & 1) ? 1 : 0) as State };
+  };
+
+  let m = next();
+  const first = await a.move(u, { playId: start.playId, cell: m.cell, state: m.truth });   // A caches the session
+  local.mark(m.cell, m.truth); local.addClues(first.unlocked);
+
+  m = next();
+  assert.equal((await b.move(u, { playId: start.playId, cell: m.cell, state: (m.truth ? 0 : 1) as State })).outcome, 'wrong');
+  await b.hint(u, { playId: start.playId });
+
+  const ack = await a.move(u, { playId: start.playId, cell: m.cell, state: m.truth });
+  assert.equal(ack.outcome, 'ok');
+  assert.equal(ack.mistakes, 1, 'A must not answer from its stale cache');
+  assert.equal(ack.hintsUsed, 1);
+  const row = (await a.store.play(start.playId))!;
+  assert.equal(row.mistakes, 1, 'the mistake made on the other instance is still on the row');
+  assert.equal(row.hints, 1);
 });
 
 test('move flooding is rate limited', async () => {
@@ -460,6 +564,44 @@ test('production refuses to leak login codes and locks down CORS', async () => {
     'an unlisted origin gets no CORS grant at all');
   assert.equal(headers()['x-content-type-options'], 'nosniff');
   assert.equal(headers()['x-frame-options'], 'DENY');
+});
+
+test('dev mode is opt-in, and never on a deployment however it is asked for', async () => {
+  assert.equal(devModeFromEnv({}), false, 'no flag, no dev — even with NODE_ENV unset');
+  assert.equal(devModeFromEnv({ NODE_ENV: 'development' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1' }), true);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', NODE_ENV: 'production' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'production' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'preview' }), false);
+  assert.equal(devModeFromEnv({ BD_DEV: '1', VERCEL_ENV: 'development' }), true, 'vercel dev is local');
+
+  // and a GameServer given no opinion behaves like production
+  const srv = new GameServer({ now: () => new Date('2026-08-20T12:00:00Z').getTime() });
+  await assert.rejects(srv.authRequest({ email: 'a@b.co' }), /no sendEmail/,
+    'with nowhere to send a code it fails, and never hands the code back');
+  const out: Record<string, string> = {};
+  const res = { setHeader: (k: string, v: string) => { out[k.toLowerCase()] = v; }, writeHead() { return res; }, end() {} } as any;
+  await srv.handler({ method: 'OPTIONS', url: '/api/today', headers: { origin: 'https://evil.example' } } as any, res);
+  assert.equal(out['access-control-allow-origin'], undefined, 'no wildcard CORS by default');
+});
+
+test('an unexpected failure is logged, and the caller gets only the code', async () => {
+  const srv = await makeServer({ now: () => new Date('2026-08-20T12:00:00Z').getTime() });
+  srv.store.weekBoard = async () => { throw new Error('relation "results" does not exist at host db.internal'); };
+  let status = 0, body = '';
+  const res = {
+    setHeader() {}, writeHead(c: number) { status = c; return res; }, end(b?: string) { body = b ?? ''; },
+  } as any;
+  const logged: unknown[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => { logged.push(a); };
+  try {
+    await srv.handler({ method: 'GET', url: '/api/week?weekId=2026-W34', headers: {} } as any, res);
+  } finally { console.error = orig; }
+  assert.equal(status, 500);
+  assert.deepEqual(JSON.parse(body), { error: 'server-error' });
+  assert.ok(!body.includes('db.internal'), 'no internal detail reaches the client');
+  assert.ok(logged.flat().some((x) => String(x).includes('db.internal')), 'but the operator sees it in the log');
 });
 
 test('health checks the things that actually break', async () => {
@@ -747,6 +889,46 @@ test('code guessing is capped too, so six digits are not brute forceable', async
     catch (e) { if (/too-many-requests/.test(String(e))) refusals++; }
   }
   assert.ok(refusals > 0, 'the guesser is stopped well short of forty tries');
+});
+
+test('a code is judged on at most five attempts, and spent exactly once however requests race', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const put = async (email: string) => { await srv.store.putAuthCode(email, '123456', clk.now() + 60_000); };
+
+  await put('four@b.co');
+  for (let i = 0; i < 4; i++) assert.equal(await srv.store.checkAuthCode('four@b.co', '000000', clk.now()), false);
+  assert.equal(await srv.store.checkAuthCode('four@b.co', '123456', clk.now()), true, 'the fifth attempt is still judged');
+
+  await put('five@b.co');
+  for (let i = 0; i < 5; i++) assert.equal(await srv.store.checkAuthCode('five@b.co', '000000', clk.now()), false);
+  assert.equal(await srv.store.checkAuthCode('five@b.co', '123456', clk.now()), false, 'the sixth is not');
+
+  // Fired together, as a burst of requests would be. Each must be counted, and a right
+  // code submitted twice at once must sign in once.
+  await put('burst@b.co');
+  const wins = await Promise.all(Array.from({ length: 4 }, () => srv.store.checkAuthCode('burst@b.co', '123456', clk.now())));
+  assert.equal(wins.filter(Boolean).length, 1, 'a code is single-use under concurrency');
+
+  await put('flood@b.co');
+  await Promise.all(Array.from({ length: 8 }, () => srv.store.checkAuthCode('flood@b.co', '000000', clk.now())));
+  assert.equal(await srv.store.checkAuthCode('flood@b.co', '123456', clk.now()), false,
+    'every guess in the burst counted toward the cap');
+});
+
+test('account deletion shares the sign-in guess budget', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const { token } = await signIn(srv, 'del@b.co');
+  const user = await userOf(srv, token);
+  const from = { headers: { 'x-forwarded-for': '8.8.8.8' }, socket: {} } as any;
+  let refusals = 0;
+  for (let i = 0; i < 40; i++) {
+    try { await srv.accountDelete(user, { confirm: 'DELETE', code: String(100000 + i) }, from); }
+    catch (e) { if (/too-many-requests/.test(String(e))) refusals++; }
+  }
+  assert.ok(refusals > 0, 'delete cannot be used as an unthrottled code oracle');
+  assert.ok(await srv.store.userByEmail('del@b.co'), 'and the account is still there');
 });
 
 test('streaks: consecutive days count, a gap resets, and the best run is remembered', () => {

@@ -149,17 +149,24 @@ export class PostgresStore implements Store {
       [email, sha(code), expiresAt]);
   }
 
+  /** Count the attempt and read the code in ONE statement, so concurrent guesses each see
+   *  their own count: read-then-increment let a burst all read attempts = 0 and all be
+   *  judged. Spending the code is conditional on it still being unused, so two correct
+   *  submissions racing cannot both sign in. */
   async checkAuthCode(email: string, code: string, now: number): Promise<boolean> {
     const row = await this.one<any>(
-      'SELECT id, code_hash, expires_at, attempts FROM auth_codes WHERE email = $1 AND used = 0 ORDER BY id DESC LIMIT 1',
+      `UPDATE auth_codes SET attempts = attempts + 1
+        WHERE id = (SELECT id FROM auth_codes WHERE email = $1 AND used = 0 ORDER BY id DESC LIMIT 1)
+          AND used = 0
+        RETURNING id, code_hash, expires_at, attempts`,
       [email]);
     if (!row) return false;
-    await this.q('UPDATE auth_codes SET attempts = attempts + 1 WHERE id = $1', [row.id]);
-    if (Number(row.attempts) >= 5 || Number(row.expires_at) < now) return false;
+    // attempts now includes this one: the first five are judged, the sixth is not
+    if (Number(row.attempts) > 5 || Number(row.expires_at) < now) return false;
     const a = Buffer.from(sha(code), 'hex'), b = Buffer.from(String(row.code_hash), 'hex');
     if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-    await this.q('UPDATE auth_codes SET used = 1 WHERE id = $1', [row.id]);
-    return true;
+    const spent = await this.pool.query('UPDATE auth_codes SET used = 1 WHERE id = $1 AND used = 0', [row.id]);
+    return (spent.rowCount ?? 0) === 1;
   }
 
   async issueToken(userId: string, expiresAt: number): Promise<string> {
@@ -191,6 +198,11 @@ export class PostgresStore implements Store {
     const set = keys.map((k, i) => `${k} = $${i + 1}`).join(', ');
     await this.q(`UPDATE plays SET ${set} WHERE id = $${keys.length + 1}`,
       [...keys.map((k) => (patch as any)[k]), id]);
+  }
+
+  async firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined> {
+    return playRow(await this.one(`SELECT * FROM plays WHERE user_id = $1 AND edition_id = $2 AND ranked = 1
+      ORDER BY started_at ASC, id ASC LIMIT 1`, [userId, editionId]));
   }
 
   /* ---------- results ---------- */

@@ -226,7 +226,8 @@ per tap.</p>
   <tr><td>Read the solution out of devtools</td><td>It was never sent. Nor was the seed that would regenerate it. A test greps the serialised response.</td></tr>
   <tr><td>Report a fake time</td><td>There is no field for it. The clock runs server-side from <code>start</code> to the final flip.</td></tr>
   <tr><td>Play an easier weekday</td><td>The client sends a mode. The server derives the edition from its own calendar.</td></tr>
-  <tr><td>Grind a board, then replay it fast</td><td>The first completed attempt is the ranked one. Later runs are practice.</td></tr>
+  <tr><td>Grind a board, then replay it fast</td><td>The first attempt <i>started</i> is the ranked one. Later runs are practice.</td></tr>
+  <tr><td>Scout the board, abandon it, restart clean</td><td>Starting a ranked board you are part-way through resumes that play, mistakes and clock included. Only the first play started can record a result.</td></tr>
   <tr><td>Solve offline, then submit</td><td>Free play is never ranked, and there is no submit endpoint.</td></tr>
   <tr><td>Flood moves</td><td>Rate limited from <code>plays.last_move_at</code> — the database, not a process-local map.</td></tr>
 </table>
@@ -307,22 +308,28 @@ ink. Both were fixed in the derivation, not in the test.</p>
 
 <table>
   <tr><th>host</th><th>changes needed</th><th>why</th></tr>
-  <tr><td>Fly · Railway · Render</td><td>wire email into <code>scripts/serve.mjs</code>; in production it also requires <code>DATABASE_URL</code> and <code>ALLOWED_ORIGINS</code></td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
+  <tr><td>Fly · Railway · Render</td><td>wire email into <code>scripts/serve.mjs</code>; in production it also requires <code>DATABASE_URL</code>, <code>ALLOWED_ORIGINS</code> and <code>EDITION_SECRET</code></td><td>a real process with a volume — <code>npm run serve</code> is the deployment</td></tr>
   <tr><td>Vercel</td><td>set <code>DATABASE_URL</code> to a hosted Postgres</td><td>no persistent disk, no memory between requests</td></tr>
   <tr><td>Static only</td><td>none</td><td>the client already falls back to local play when no server answers</td></tr>
 </table>
 
 <p>Two properties make serverless viable at all, and both were designed in rather than
 patched on: <b>every cache is rebuildable</b> (puzzles regenerate from their seed, play state
-replays from validated moves), and <b>rate limiting reads the database</b>.</p>
+replays from validated moves, and a cached play is trusted only while its move, mistake
+and hint counts match the database row), and <b>rate limiting reads the database</b>.</p>
 
 <p>On Vercel, <code>vercel.json</code> builds the engine and the demo into
 <code>demo/dist</code> and rewrites every <code>/api/*</code> route to one function,
 <code>api/index.ts</code>, which runs the same <code>GameServer</code> as
 <code>npm run serve</code> over <code>PostgresStore</code> (<code>src/net/store-pg.ts</code>).
 It migrates on cold start, refuses to start without <code>DATABASE_URL</code> (or
-<code>POSTGRES_URL</code>), and delivers sign-in codes through Resend. <code>npm run test:pg</code>
-runs the whole server suite against Postgres, so both stores answer to the same tests.
+<code>POSTGRES_URL</code>) or <code>EDITION_SECRET</code>, and delivers sign-in codes through
+Resend. Dev mode — codes in the response, any CORS origin, a public seed key — is an explicit
+opt-in (<code>BD_DEV=1</code>, which <code>npm run serve</code> passes) and is refused under
+<code>NODE_ENV=production</code> and on Vercel production and preview deployments. <code>npm run test:pg</code>
+runs the whole server suite against Postgres, so both stores answer to the same tests; CI
+(<code>.github/workflows/ci.yml</code>) runs it on every push and pull request against a
+Postgres service container, alongside the unit tests, the fuzz and the browser e2e.
 Operator feature flags (<code>src/net/flags.ts</code>) are enforced server-side and sit
 behind their own <code>ADMIN_TOKEN</code>; unset, <code>/api/admin/*</code> does not exist.</p>
 
@@ -368,14 +375,14 @@ artwork carry it, so one build serves both URLs.</p>
     flags.ts — operator feature flags
   </div>
   <div class="card"><b>test · demo · api</b>
-    82 tests + a 294-board fuzz<br>
+    94 tests + a 294-board fuzz<br>
     demo/ — single-file game + how, tech, legal, account pages<br>
     api/ + vercel.json — serverless<br>
     src/base.ts — path prefix
   </div>
 </div>
 
-<p class="foot">Verification: 82 tests, a 294-board fuzz across every theme and difficulty
+<p class="foot">Verification: 94 tests, a 294-board fuzz across every theme and difficulty
 (11,982 clue renders), WCAG contrast assertions across 63 theme/mode combinations, and
 anti-cheat tests covering every claim in section 5. <code>npm run e2e</code> drives Chromium
 against a real server for what unit tests cannot see. Worst observed generate-and-solve: ~120ms.</p>

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Clues — What's left before production</title>
+<title>Beyond Doubt — What's left before production</title>
 <style>
   :root{--ink:#15181d;--ink2:#454c57;--ink3:#727a86;--paper:#f5f3ee;--card:#fffefb;
         --rule:#ded8cc;--accent:#b5501f;--good:#2f6f57;--warn:#a5761c;--code:#f0ece2}
@@ -42,7 +42,7 @@
 <body>
 <div class="wrap">
 
-<p class="kicker">Clues — production readiness</p>
+<p class="kicker">Beyond Doubt — production readiness</p>
 <h1>What's left before this can go live</h1>
 <p class="lede">Everything that could be closed from inside the codebase now is closed,
 including the Postgres store, which is written and passing the entire server test suite
@@ -72,14 +72,17 @@ things that need you, not more code.</p>
   <h3><span class="tick">✓</span> Login codes stop leaking in production <span class="who me">done</span></h3>
   <p><code>authRequest</code> returned the six-digit code in the response body — correct for
   development, an account-takeover hole in production. There is now a <code>sendEmail</code>
-  hook; with <code>NODE_ENV=production</code> the code goes to the hook and the response
-  carries nothing. Tested both ways.</p>
+  hook, and dev mode is now an explicit opt-in (<code>BD_DEV=1</code>, never with
+  <code>NODE_ENV=production</code> or on a Vercel deployment) rather than "anything that is not
+  production", so the code goes to the hook and the response carries nothing unless someone
+  deliberately asked for dev. Tested both ways.</p>
 </div>
 
 <div class="item done">
   <h3><span class="tick">✓</span> Refuses to boot misconfigured <span class="who me">done</span></h3>
-  <p>In production the server exits rather than starting without <code>DATABASE_URL</code> and
-  <code>ALLOWED_ORIGINS</code>. The failure mode this prevents is the quiet one: booting on
+  <p>In production the server exits rather than starting without <code>DATABASE_URL</code>,
+  <code>ALLOWED_ORIGINS</code> and <code>EDITION_SECRET</code> (the Vercel function requires
+  <code>DATABASE_URL</code> and <code>EDITION_SECRET</code>). The failure mode this prevents is the quiet one: booting on
   SQLite in <code>/tmp</code>, appearing to work, and losing every account on the next deploy.</p>
 </div>
 

@@ -1,4 +1,4 @@
-# @clues/engine
+# @beyond-doubt/engine
 
 A no-guess deduction engine. **Theme is a skin layer, and it always was.** English, Portuguese
 and Spanish are first-class, including gender and number agreement.
@@ -9,8 +9,8 @@ illustration function.
 
 ```
 npm install
-npm run verify      # types, 82 tests, 294-board fuzz, builds the demo, then e2e
-npm run serve       # http://localhost:8787  — accounts + ranked play
+npm run verify      # types, 94 tests, 294-board fuzz, builds the demo, then e2e
+npm run serve       # http://localhost:8787  — accounts + ranked play, in dev mode (--dev)
 ```
 
 `demo/dist/clues-demo.html` also runs standalone from the filesystem: it detects that no
@@ -196,13 +196,22 @@ ranked board without the secret rather than fall back. The browser builds only p
 split play and the offline fallback included — because a board built in the page carries its
 whole solution.
 
-**The first completed attempt is the ranked one.** Replaying a board you have solved is
-practice; it cannot improve your placement. Free play is never ranked at all.
+**The first attempt *started* is the ranked one.** Not the first finished: otherwise you
+could open the board, make your mistakes, walk away and start a clean run knowing the answer.
+So starting a ranked board you are part-way through *resumes* that play — its moves, its
+mistakes, its hints and its clock, which kept running while you were away — whether you
+reloaded, switched device or joined a room. (`start` returns it with a `resume` block; the
+client replays the moves.) Replaying a board you have finished is practice and cannot
+improve your placement, and if two starts ever race, only the earlier play can record a
+result. Free play is never ranked at all.
 
 Also enforced server-side: hints and mistakes are counted and persisted (a hinted run is not
 "perfect"), moves on someone else's play are rejected, out-of-range cells are rejected, move
 flooding is rate limited, login codes are single-use, attempt-capped, expiring and compared in
 constant time, and tokens are stored only as hashes.
+
+An unexpected server error answers `500 { "error": "server-error" }` and nothing more; the
+underlying message (which can quote a mail provider or Postgres) goes to the server log.
 
 What is *not* solved here: two people at one screen, or someone photographing a friend's
 board. That is a social problem, not a cryptographic one, and every daily puzzle game has it.
@@ -210,8 +219,16 @@ board. That is a social problem, not a cryptographic one, and every daily puzzle
 ### Auth
 
 Passwordless six-digit code by email. In dev the code comes back in the response body so you
-can sign in without an email provider; in production `authRequest` hands it to the
-`sendEmail` option (Resend, in `api/index.ts`) and returns `{ sent: true }` alone. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
+can sign in without an email provider; otherwise `authRequest` hands it to the
+`sendEmail` option (Resend, in `api/index.ts`) and returns `{ sent: true }` alone, and with no
+`sendEmail` at all the request fails rather than claim a code was sent.
+
+Dev mode is **opt-in**: `GameServer` defaults to production behaviour, and the entry points
+turn dev on only through `devModeFromEnv()` — `BD_DEV=1` (which `npm run serve` passes as
+`--dev`), and never alongside `NODE_ENV=production` or on a Vercel production or preview
+deployment. Dev also allows any CORS origin and keys ranked seeds with a public placeholder,
+so a deployment that fell into it would hand out sign-in codes and buildable boards; a missing
+variable must not be what turns it on. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
 
 ### Storage
 
@@ -346,9 +363,15 @@ Two details that are easy to get wrong and hard to notice:
 
 `Store.hitRateLimit(key, windowMs, now)` records an attempt and returns how many happened
 in the window. The server keys on both the IP and the address, because each alone is
-trivially varied. It is deliberately approximate — two racing requests can both squeak
+trivially varied. Account deletion checks an emailed code too, so it draws on the same
+per-IP and per-address budget as code entry rather than offering a second door. It is deliberately approximate — two racing requests can both squeak
 through, which for a speed bump on a sign-in form is a fair trade against locking a table on
 every hit.
+
+The code itself is not approximate. Each check counts the attempt and reads the code in one
+`UPDATE … RETURNING`, so a burst of guesses cannot all read "no attempts yet"; only the first
+five attempts on a code are judged; and spending it is conditional on it still being unused,
+so two correct submissions racing sign in once.
 
 ## End-to-end checks
 
@@ -365,10 +388,19 @@ and the deploy build has no business doing that. Install it where you run the ch
     npm i --no-save playwright && npx playwright install chromium
 
 — and `npm run e2e` picks it up. Without it the script says so and exits rather than
-failing obscurely. `npm run verify` typechecks and runs the 82 unit tests, the fuzz, the
+failing obscurely. `npm run verify` typechecks and runs the 94 unit tests, the fuzz, the
 demo build and then e2e. The Postgres store is covered separately by `npm run test:pg`,
 which needs a running server.
 
+CI (`.github/workflows/ci.yml`, every push and pull request) runs all of it in three jobs:
+unit tests, fuzz and the demo typecheck; `npm run test:pg` against a `postgres:16` service
+container; and e2e, installing Playwright's Chromium on the runner.
+
+
+## Operating it
+
+Feature flags, the admin page, account requests, sign-in throttling and streak questions:
+see [`docs/ADMIN.md`](docs/ADMIN.md).
 
 ## Deploying
 
@@ -395,7 +427,10 @@ than patched on:
 
 - **Every cache is rebuildable.** Puzzles regenerate from their seed. Play state replays from
   the moves the server already validated. So a request landing on a cold instance that has
-  never seen your board is indistinguishable from one that has.
+  never seen your board is indistinguishable from one that has. The reverse matters as much:
+  a warm instance's cached play is used only while its move, mistake and hint counts match
+  the database row, so a cache that missed a move handled elsewhere is rebuilt rather than
+  written back over it.
 - **Rate limiting reads the database**, not a `Map`. That was a real change made for this —
   an in-process counter is worthless when the next request may hit a different process.
 
@@ -415,9 +450,12 @@ What you still have to do:
 1. **Provision Postgres** (Vercel Postgres, Neon, Supabase — any of them). SQLite on Vercel
    writes to `/tmp`, which is per-instance and wiped without warning. It will *appear* to
    work in testing and lose accounts in production.
-2. **Set the secrets:** `DATABASE_URL`, and `NODE_ENV=production` so login codes stop coming
-   back in the response body. `ALLOWED_ORIGINS`, `ADMIN_TOKEN` (unset, `/api/admin/*` does
-   not exist) and `LAUNCH_DATE` are optional.
+2. **Set the secrets:** `DATABASE_URL` and `EDITION_SECRET` (a long random string that keys
+   ranked seeds — keep it stable, since changing it changes every ranked board from
+   `SECRET_SEEDS_FROM` on). The function refuses to start without either. Vercel sets
+   `NODE_ENV=production` itself; never set `BD_DEV` there (it is ignored anyway).
+   `ALLOWED_ORIGINS` (only needed for cross-origin callers — the game calls its own origin),
+   `ADMIN_TOKEN` (unset, `/api/admin/*` does not exist) and `LAUNCH_DATE` are optional.
 3. **Send real email.** `api/index.ts` delivers codes through Resend and needs
    `RESEND_API_KEY` (and `MAIL_FROM` for a verified sender). Without it a sign-in request
    fails loudly rather than leaving the player waiting for a code that is not coming.
@@ -430,7 +468,9 @@ What you still have to do:
 Deploy to Fly or Railway with a small volume mounted at `/data` and set
 `DB=/data/clues.db`, and `npm run serve` runs the whole game on SQLite, one process and one
 file. Two things stand between that and production as `scripts/serve.mjs` is written today:
-with `NODE_ENV=production` it refuses to start without `DATABASE_URL` and `ALLOWED_ORIGINS`,
-and it passes no `sendEmail`, so sign-in codes would go nowhere. Both are small changes to
+with `NODE_ENV=production` it refuses to start without `DATABASE_URL`, `ALLOWED_ORIGINS` and
+`EDITION_SECRET`, and it passes no `sendEmail`, so sign-in requests would fail. Run it as
+`node scripts/serve.mjs` after a build rather than `npm run serve`, which adds `--dev`
+(ignored under `NODE_ENV=production`, but there is no reason to pass it). Both are small changes to
 that script — copy the Resend sender from `api/index.ts` — and for a daily puzzle game with
 a leaderboard one process and one file will still carry you a long way.

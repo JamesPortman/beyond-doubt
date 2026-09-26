@@ -2,7 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-import { Store, SqliteStore, newId, roomCode, UserRow } from './store.js';
+import { Store, SqliteStore, newId, roomCode, UserRow, PlayRow } from './store.js';
 import * as P from './protocol.js';
 import { Session } from '../core/session.js';
 import { Puzzle, PlacedClue, PuzzleView, generate } from '../core/generate.js';
@@ -24,7 +24,9 @@ export interface ServerOptions {
    *  board at a time. Must be YYYY-MM-DD — the comparisons are string comparisons, so an
    *  unpadded month would fail silently and in a way nobody would think to look for. */
   launchDate?: string;
-  /** dev returns the login code in the response instead of emailing it */
+  /** dev returns the login code in the response instead of emailing it, allows any CORS
+   *  origin, and keys ranked seeds with a public placeholder. Off unless asked for — a
+   *  forgotten environment variable must never be what turns it on. See devModeFromEnv. */
   dev?: boolean;
   /** Keys the seeds of ranked boards dated SECRET_SEEDS_FROM or later (EDITION_SECRET).
    *  Production MUST set it: without it those boards refuse to start, rather than fall
@@ -63,6 +65,17 @@ const FLAGS_TTL_MS = 5_000;
 const SIGNIN_WINDOW_MS = 15 * 60_000;
 const SIGNIN_PER_IP = 12;
 const SIGNIN_PER_EMAIL = 5;
+
+/** Dev mode is an explicit opt-in (`BD_DEV=1`), and even then never on a real deployment:
+ *  not with NODE_ENV=production, and not on any Vercel environment but `vercel dev`. It used
+ *  to be "anything that is not NODE_ENV=production", which failed open — one missing variable
+ *  and sign-in codes came back in the response to whoever asked for them. */
+export function devModeFromEnv(env: Record<string, string | undefined>): boolean {
+  if (env.BD_DEV !== '1') return false;
+  if (env.NODE_ENV === 'production') return false;
+  if (env.VERCEL_ENV && env.VERCEL_ENV !== 'development') return false;
+  return true;
+}
 
 /** Until someone chooses one, the game has always existed since the day it is asked. */
 /** A launch date only works as a plain ISO day, because every check against it is a string
@@ -116,13 +129,16 @@ export class GameServer {
     const timezone = o.timezone ?? GAME_TZ;
     this.opts = {
       dbPath: o.dbPath ?? ':memory:',
-      dev: o.dev ?? true,
+      dev: o.dev ?? false,
       now,
       hintBudget: o.hintBudget ?? HINT_BUDGET,
       minMoveIntervalMs: o.minMoveIntervalMs ?? 40,
       launchDate: isoLaunch(o.launchDate, now(), timezone),
-      allowedOrigins: o.allowedOrigins ?? (o.dev === false ? [] : ['*']),
-      sendEmail: o.sendEmail ?? (async () => { /* dev: the code comes back in the response */ }),
+      allowedOrigins: o.allowedOrigins ?? (o.dev ? ['*'] : []),
+      sendEmail: o.sendEmail ?? (o.dev
+        ? async () => { /* dev: the code comes back in the response */ }
+        // not dev and nowhere to send the code: fail the request rather than report "sent"
+        : async () => { throw new Error('no sendEmail configured — cannot deliver sign-in codes'); }),
       timezone,
       adminToken: o.adminToken ?? '',
       editionSecret: o.editionSecret ?? '',
@@ -263,21 +279,26 @@ export class GameServer {
     };
   }
 
-  /** Rebuild authoritative play state from the stored move list. */
-  private async sessionFor(playId: string): Promise<{ session: Session; puzzle: Puzzle }> {
-    const row = await this.store.play(playId);
-    if (!row) throw new HttpError(404, 'no-such-play');
+  /** Rebuild authoritative play state from the stored move list.
+   *
+   *  The per-instance cache is only trusted while it agrees with the row. On a serverless
+   *  host the previous move may have been handled by another instance, and a stale session
+   *  here would write its older mistake and hint counts back over the newer ones. Moves,
+   *  mistakes and hints only ever grow, so matching all three counts means matching state. */
+  private sessionFor(row: PlayRow): { session: Session; puzzle: Puzzle } {
     const puzzle = this.puzzleFor({
       id: row.edition_id, kind: row.ranked ? 'daily' : 'free',
       themeId: row.theme_id, difficulty: row.difficulty, seed: row.seed,
     });
-    let session = this.live.get(playId);
-    if (!session) {
+    const moves = JSON.parse(row.moves) as { c: number; s: State }[];
+    let session = this.live.get(row.id);
+    if (!session || session.moves.length !== moves.length
+      || session.mistakes !== row.mistakes || session.hintsUsed !== row.hints) {
       session = new Session({ puzzle, hintBudget: this.opts.hintBudget, now: () => 0 });
-      for (const m of JSON.parse(row.moves) as { c: number; s: State }[]) session.mark(m.c, m.s);
+      for (const m of moves) session.mark(m.c, m.s);
       session.mistakes = row.mistakes;
       session.hintsUsed = row.hints;
-      this.live.set(playId, session);
+      this.live.set(row.id, session);
     }
     return { session, puzzle };
   }
@@ -338,24 +359,52 @@ export class GameServer {
     return { token, user: { id: user.id, displayName: user.display_name, email: user.email } };
   }
 
+  /** One ranked attempt per player per edition, and it is the first one STARTED, not the
+   *  first one finished. Otherwise a player could open the board, read the clues, make
+   *  their mistakes, walk away and start a clean run knowing the answer — and the clean run
+   *  would be the one recorded. So starting a ranked board you are part-way through
+   *  resumes that play, clock and mistakes included; starting one you have finished is
+   *  practice. A reload, a second device or a room all land on the same attempt. */
   async start(user: UserRow, b: P.StartBody): Promise<P.StartResult> {
     const { ref, ranked } = await this.refFor(b);
     const puzzle = this.puzzleFor(ref);
+    const first = ranked ? await this.store.firstRankedPlay(user.id, ref.id) : undefined;
+    const prior = await this.store.resultFor(ref.id, user.id);
+    const edition: P.EditionInfo = {
+      id: ref.id, kind: ref.kind === 'weekly' ? 'weekly' : ref.kind === 'daily' ? 'daily' : 'free',
+      themeId: ref.themeId, difficulty: ref.difficulty,
+      date: ref.date, weekId: ref.weekId, dayIndex: ref.dayIndex, ranked,
+    };
+
+    if (first && first.status === 'open' && !prior) {
+      const { session } = this.sessionFor(first);
+      return {
+        playId: first.id,
+        edition,
+        view: this.viewOf(puzzle, session.activeClues()),
+        serverNow: this.now(),
+        hintBudget: this.opts.hintBudget,
+        previousResult: null,
+        resume: {
+          moves: JSON.parse(first.moves) as { c: number; s: State }[],
+          mistakes: first.mistakes, hintsUsed: first.hints,
+          elapsedMs: this.now() - first.started_at,
+        },
+      };
+    }
+
     const playId = newId('ply');
     await this.store.createPlay({
       id: playId, user_id: user.id, edition_id: ref.id, week_id: ref.weekId ?? null,
-      theme_id: ref.themeId, difficulty: ref.difficulty, seed: ref.seed, ranked: ranked ? 1 : 0,
+      theme_id: ref.themeId, difficulty: ref.difficulty, seed: ref.seed,
+      // a replay of a board already attempted is practice, whatever the edition is
+      ranked: ranked && !first && !prior ? 1 : 0,
       iso_date: ref.date ?? null,
       started_at: this.now(),
     });
-    const prior = await this.store.resultFor(ref.id, user.id);
     return {
       playId,
-      edition: {
-        id: ref.id, kind: ref.kind === 'weekly' ? 'weekly' : ref.kind === 'daily' ? 'daily' : 'free',
-        themeId: ref.themeId, difficulty: ref.difficulty,
-        date: ref.date, weekId: ref.weekId, dayIndex: ref.dayIndex, ranked,
-      },
+      edition,
       view: this.viewOf(puzzle, puzzle.clues.filter((c) => c.gate === null)),
       serverNow: this.now(),
       hintBudget: this.opts.hintBudget,
@@ -381,7 +430,7 @@ export class GameServer {
     if (t - (row.last_move_at ?? 0) < this.opts.minMoveIntervalMs) throw new HttpError(429, 'too-fast');
     await this.store.updatePlay(b.playId, { last_move_at: t } as any);
 
-    const { session, puzzle } = await this.sessionFor(b.playId);
+    const { session, puzzle } = this.sessionFor(row);
     const cell = Number(b.cell);
     if (!Number.isInteger(cell) || cell < 0 || cell >= puzzle.n) throw new HttpError(400, 'bad-cell');
     const state = (b.state === 1 ? 1 : 0) as State;
@@ -412,7 +461,9 @@ export class GameServer {
       // member the day it represents, and for free play nothing at all
       const playedDate = row.iso_date;
       let ranked = false;
-      if (row.ranked) {
+      // Only the first ranked play started on this edition may rank. start() never opens a
+      // second one, but two racing starts could; this is the check that settles it.
+      if (row.ranked && (await this.store.firstRankedPlay(user.id, row.edition_id))?.id === row.id) {
         const outcome = await this.store.recordResult({
           edition_id: row.edition_id, week_id: row.week_id, user_id: user.id, theme_id: row.theme_id,
           time_ms: elapsed, hints: session.hintsUsed, mistakes: session.mistakes,
@@ -452,7 +503,7 @@ export class GameServer {
     const row = await this.store.play(b.playId);
     if (!row) throw new HttpError(404, 'no-such-play');
     if (row.user_id !== user.id) throw new HttpError(403, 'not-your-play');
-    const { session } = await this.sessionFor(b.playId);
+    const { session } = this.sessionFor(row);
     const hint = session.hint();
     await this.store.updatePlay(b.playId, { hints: session.hintsUsed } as any);
     return { hint, hintsUsed: session.hintsUsed, remaining: this.opts.hintBudget - session.hintsUsed };
@@ -500,6 +551,7 @@ export class GameServer {
       edition: start.edition, view: start.view,
       serverNow: now, hintBudget: start.hintBudget,
       players: await this.presence(room.id, user.id),
+      resume: start.resume,
     };
   }
 
@@ -668,10 +720,14 @@ export class GameServer {
   /** Deleting an account is irreversible, so it takes more than a live session: the
    *  player proves the address still theirs with a fresh emailed code. A stolen phone
    *  should not be able to erase someone's five-year streak. */
-  async accountDelete(user: UserRow, b: { code?: string; confirm?: string }): Promise<P.DeleteResult> {
+  async accountDelete(user: UserRow, b: { code?: string; confirm?: string }, req?: IncomingMessage): Promise<P.DeleteResult> {
     if (String(b?.confirm ?? '').trim().toUpperCase() !== 'DELETE') {
       throw new HttpError(400, 'confirm-required');
     }
+    // The same code, so the same budget as authVerify: guessing through this door must not
+    // buy anyone extra tries at it.
+    await this.throttle(`vip:${this.clientIp(req)}`, SIGNIN_PER_IP);
+    await this.throttle(`vemail:${user.email}`, SIGNIN_PER_EMAIL * 2);
     if (!await this.store.checkAuthCode(user.email, String(b?.code ?? ''), this.now())) {
       throw new HttpError(401, 'bad-code');
     }
@@ -716,7 +772,11 @@ export class GameServer {
     } catch (e) {
       const err = e as HttpError;
       const code = err.status ?? 500;
-      json(res, code, { error: err.code ?? 'server-error', detail: code === 500 ? String(err.message) : undefined });
+      // An unexpected error's message is for the operator, not the caller: it can carry a
+      // mail provider's reply or a Postgres error naming tables and values. Log it here and
+      // answer with the bare code.
+      if (!(e instanceof HttpError)) console.error(`${req.method} ${url.pathname} failed:`, e);
+      json(res, code, { error: err.code ?? 'server-error' });
     }
   };
 
@@ -726,7 +786,7 @@ export class GameServer {
       case '/api/auth/verify': return this.authVerify(body, req);
       case '/api/me': return this.me(await this.auth(req));
       case '/api/account/export': return this.accountExport(await this.auth(req));
-      case '/api/account/delete': return this.accountDelete(await this.auth(req), body);
+      case '/api/account/delete': return this.accountDelete(await this.auth(req), body, req);
       case '/api/play/start': return this.start(await this.auth(req), body);
       case '/api/play/move': return this.move(await this.auth(req), body);
       case '/api/play/hint': return this.hint(await this.auth(req), body);
