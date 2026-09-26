@@ -2,7 +2,7 @@ import { createServer, IncomingMessage, ServerResponse } from 'node:http';
 import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
-import { Store, SqliteStore, newId, roomCode, UserRow } from './store.js';
+import { Store, SqliteStore, newId, roomCode, UserRow, PlayRow } from './store.js';
 import * as P from './protocol.js';
 import { Session } from '../core/session.js';
 import { Puzzle, PlacedClue, PuzzleView, generate } from '../core/generate.js';
@@ -263,21 +263,26 @@ export class GameServer {
     };
   }
 
-  /** Rebuild authoritative play state from the stored move list. */
-  private async sessionFor(playId: string): Promise<{ session: Session; puzzle: Puzzle }> {
-    const row = await this.store.play(playId);
-    if (!row) throw new HttpError(404, 'no-such-play');
+  /** Rebuild authoritative play state from the stored move list.
+   *
+   *  The per-instance cache is only trusted while it agrees with the row. On a serverless
+   *  host the previous move may have been handled by another instance, and a stale session
+   *  here would write its older mistake and hint counts back over the newer ones. Moves,
+   *  mistakes and hints only ever grow, so matching all three counts means matching state. */
+  private sessionFor(row: PlayRow): { session: Session; puzzle: Puzzle } {
     const puzzle = this.puzzleFor({
       id: row.edition_id, kind: row.ranked ? 'daily' : 'free',
       themeId: row.theme_id, difficulty: row.difficulty, seed: row.seed,
     });
-    let session = this.live.get(playId);
-    if (!session) {
+    const moves = JSON.parse(row.moves) as { c: number; s: State }[];
+    let session = this.live.get(row.id);
+    if (!session || session.moves.length !== moves.length
+      || session.mistakes !== row.mistakes || session.hintsUsed !== row.hints) {
       session = new Session({ puzzle, hintBudget: this.opts.hintBudget, now: () => 0 });
-      for (const m of JSON.parse(row.moves) as { c: number; s: State }[]) session.mark(m.c, m.s);
+      for (const m of moves) session.mark(m.c, m.s);
       session.mistakes = row.mistakes;
       session.hintsUsed = row.hints;
-      this.live.set(playId, session);
+      this.live.set(row.id, session);
     }
     return { session, puzzle };
   }
@@ -356,7 +361,7 @@ export class GameServer {
     };
 
     if (first && first.status === 'open' && !prior) {
-      const { session } = await this.sessionFor(first.id);
+      const { session } = this.sessionFor(first);
       return {
         playId: first.id,
         edition,
@@ -409,7 +414,7 @@ export class GameServer {
     if (t - (row.last_move_at ?? 0) < this.opts.minMoveIntervalMs) throw new HttpError(429, 'too-fast');
     await this.store.updatePlay(b.playId, { last_move_at: t } as any);
 
-    const { session, puzzle } = await this.sessionFor(b.playId);
+    const { session, puzzle } = this.sessionFor(row);
     const cell = Number(b.cell);
     if (!Number.isInteger(cell) || cell < 0 || cell >= puzzle.n) throw new HttpError(400, 'bad-cell');
     const state = (b.state === 1 ? 1 : 0) as State;
@@ -482,7 +487,7 @@ export class GameServer {
     const row = await this.store.play(b.playId);
     if (!row) throw new HttpError(404, 'no-such-play');
     if (row.user_id !== user.id) throw new HttpError(403, 'not-your-play');
-    const { session } = await this.sessionFor(b.playId);
+    const { session } = this.sessionFor(row);
     const hint = session.hint();
     await this.store.updatePlay(b.playId, { hints: session.hintsUsed } as any);
     return { hint, hintsUsed: session.hintsUsed, remaining: this.opts.hintBudget - session.hintsUsed };

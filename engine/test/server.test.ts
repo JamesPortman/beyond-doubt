@@ -284,6 +284,38 @@ test('a second ranked play on the same edition can never rank, even if two start
   assert.equal(real.last.result.ranked, true);
 });
 
+test('a move on one instance cannot erase a mistake or hint recorded by another', async () => {
+  // Two serverless instances over one database, each with its own in-memory cache.
+  const clk = clock('2026-08-20T12:00:00Z');
+  const a = await makeServer({ now: clk.now, minMoveIntervalMs: 0 });
+  const b = new GameServer({ store: a.store, now: clk.now, minMoveIntervalMs: 0, dev: true });
+  const { token } = await signIn(a, 'split@b.co');
+  const u = await userOf(a, token);
+  const start = await a.start(u, { mode: 'daily', themeId: 'orchard' });
+  const local = new Session({ puzzle: start.view, now: () => 0 });
+  const next = () => {
+    const d = local.deduction();
+    const cell = bits(d.forcedA | d.forcedB)[0];
+    return { cell, truth: (((d.forcedB >> cell) & 1) ? 1 : 0) as State };
+  };
+
+  let m = next();
+  const first = await a.move(u, { playId: start.playId, cell: m.cell, state: m.truth });   // A caches the session
+  local.mark(m.cell, m.truth); local.addClues(first.unlocked);
+
+  m = next();
+  assert.equal((await b.move(u, { playId: start.playId, cell: m.cell, state: (m.truth ? 0 : 1) as State })).outcome, 'wrong');
+  await b.hint(u, { playId: start.playId });
+
+  const ack = await a.move(u, { playId: start.playId, cell: m.cell, state: m.truth });
+  assert.equal(ack.outcome, 'ok');
+  assert.equal(ack.mistakes, 1, 'A must not answer from its stale cache');
+  assert.equal(ack.hintsUsed, 1);
+  const row = (await a.store.play(start.playId))!;
+  assert.equal(row.mistakes, 1, 'the mistake made on the other instance is still on the row');
+  assert.equal(row.hints, 1);
+});
+
 test('move flooding is rate limited', async () => {
   const clk = clock('2026-08-20T12:00:00Z');
   const srv = await makeServer({ now: clk.now, minMoveIntervalMs: 40 });

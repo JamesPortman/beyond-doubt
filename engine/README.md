@@ -401,7 +401,10 @@ than patched on:
 
 - **Every cache is rebuildable.** Puzzles regenerate from their seed. Play state replays from
   the moves the server already validated. So a request landing on a cold instance that has
-  never seen your board is indistinguishable from one that has.
+  never seen your board is indistinguishable from one that has. The reverse matters as much:
+  a warm instance's cached play is used only while its move, mistake and hint counts match
+  the database row, so a cache that missed a move handled elsewhere is rebuilt rather than
+  written back over it.
 - **Rate limiting reads the database**, not a `Map`. That was a real change made for this —
   an in-process counter is worthless when the next request may hit a different process.
 
