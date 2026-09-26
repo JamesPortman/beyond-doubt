@@ -211,18 +211,22 @@ export class SqliteStore implements Store {
     this.db.prepare('INSERT INTO auth_codes (email,code_hash,expires_at) VALUES (?,?,?)')
       .run(email, sha(code), expiresAt);
   }
-  /** Constant-time compare, single-use, attempt-capped. */
+  /** Constant-time compare, single-use, attempt-capped. The attempt is counted and the
+   *  code read in one statement, and spending it is conditional on it being unused — the
+   *  same shape as the Postgres store, where requests really do race. */
   async checkAuthCode(email: string, code: string, now: number): Promise<boolean> {
     const row = this.db.prepare(
-      'SELECT rowid, code_hash, expires_at, attempts, used FROM auth_codes WHERE email = ? AND used = 0 ORDER BY rowid DESC LIMIT 1',
+      `UPDATE auth_codes SET attempts = attempts + 1
+        WHERE rowid = (SELECT rowid FROM auth_codes WHERE email = ? AND used = 0 ORDER BY rowid DESC LIMIT 1)
+          AND used = 0
+        RETURNING rowid, code_hash, expires_at, attempts`,
     ).get(email) as any;
     if (!row) return false;
-    this.db.prepare('UPDATE auth_codes SET attempts = attempts + 1 WHERE rowid = ?').run(row.rowid);
-    if (row.attempts >= 5 || row.expires_at < now) return false;
+    // attempts now includes this one: the first five are judged, the sixth is not
+    if (row.attempts > 5 || row.expires_at < now) return false;
     const a = Buffer.from(sha(code), 'hex'), b = Buffer.from(String(row.code_hash), 'hex');
     if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-    this.db.prepare('UPDATE auth_codes SET used = 1 WHERE rowid = ?').run(row.rowid);
-    return true;
+    return Number(this.db.prepare('UPDATE auth_codes SET used = 1 WHERE rowid = ? AND used = 0').run(row.rowid).changes) === 1;
   }
 
   async issueToken(userId: string, expiresAt: number): Promise<string> {

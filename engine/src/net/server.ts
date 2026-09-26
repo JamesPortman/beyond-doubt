@@ -720,10 +720,14 @@ export class GameServer {
   /** Deleting an account is irreversible, so it takes more than a live session: the
    *  player proves the address still theirs with a fresh emailed code. A stolen phone
    *  should not be able to erase someone's five-year streak. */
-  async accountDelete(user: UserRow, b: { code?: string; confirm?: string }): Promise<P.DeleteResult> {
+  async accountDelete(user: UserRow, b: { code?: string; confirm?: string }, req?: IncomingMessage): Promise<P.DeleteResult> {
     if (String(b?.confirm ?? '').trim().toUpperCase() !== 'DELETE') {
       throw new HttpError(400, 'confirm-required');
     }
+    // The same code, so the same budget as authVerify: guessing through this door must not
+    // buy anyone extra tries at it.
+    await this.throttle(`vip:${this.clientIp(req)}`, SIGNIN_PER_IP);
+    await this.throttle(`vemail:${user.email}`, SIGNIN_PER_EMAIL * 2);
     if (!await this.store.checkAuthCode(user.email, String(b?.code ?? ''), this.now())) {
       throw new HttpError(401, 'bad-code');
     }
@@ -782,7 +786,7 @@ export class GameServer {
       case '/api/auth/verify': return this.authVerify(body, req);
       case '/api/me': return this.me(await this.auth(req));
       case '/api/account/export': return this.accountExport(await this.auth(req));
-      case '/api/account/delete': return this.accountDelete(await this.auth(req), body);
+      case '/api/account/delete': return this.accountDelete(await this.auth(req), body, req);
       case '/api/play/start': return this.start(await this.auth(req), body);
       case '/api/play/move': return this.move(await this.auth(req), body);
       case '/api/play/hint': return this.hint(await this.auth(req), body);

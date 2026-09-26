@@ -363,9 +363,15 @@ Two details that are easy to get wrong and hard to notice:
 
 `Store.hitRateLimit(key, windowMs, now)` records an attempt and returns how many happened
 in the window. The server keys on both the IP and the address, because each alone is
-trivially varied. It is deliberately approximate — two racing requests can both squeak
+trivially varied. Account deletion checks an emailed code too, so it draws on the same
+per-IP and per-address budget as code entry rather than offering a second door. It is deliberately approximate — two racing requests can both squeak
 through, which for a speed bump on a sign-in form is a fair trade against locking a table on
 every hit.
+
+The code itself is not approximate. Each check counts the attempt and reads the code in one
+`UPDATE … RETURNING`, so a burst of guesses cannot all read "no attempts yet"; only the first
+five attempts on a code are judged; and spending it is conditional on it still being unused,
+so two correct submissions racing sign in once.
 
 ## End-to-end checks
 

@@ -891,6 +891,46 @@ test('code guessing is capped too, so six digits are not brute forceable', async
   assert.ok(refusals > 0, 'the guesser is stopped well short of forty tries');
 });
 
+test('a code is judged on at most five attempts, and spent exactly once however requests race', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const put = async (email: string) => { await srv.store.putAuthCode(email, '123456', clk.now() + 60_000); };
+
+  await put('four@b.co');
+  for (let i = 0; i < 4; i++) assert.equal(await srv.store.checkAuthCode('four@b.co', '000000', clk.now()), false);
+  assert.equal(await srv.store.checkAuthCode('four@b.co', '123456', clk.now()), true, 'the fifth attempt is still judged');
+
+  await put('five@b.co');
+  for (let i = 0; i < 5; i++) assert.equal(await srv.store.checkAuthCode('five@b.co', '000000', clk.now()), false);
+  assert.equal(await srv.store.checkAuthCode('five@b.co', '123456', clk.now()), false, 'the sixth is not');
+
+  // Fired together, as a burst of requests would be. Each must be counted, and a right
+  // code submitted twice at once must sign in once.
+  await put('burst@b.co');
+  const wins = await Promise.all(Array.from({ length: 4 }, () => srv.store.checkAuthCode('burst@b.co', '123456', clk.now())));
+  assert.equal(wins.filter(Boolean).length, 1, 'a code is single-use under concurrency');
+
+  await put('flood@b.co');
+  await Promise.all(Array.from({ length: 8 }, () => srv.store.checkAuthCode('flood@b.co', '000000', clk.now())));
+  assert.equal(await srv.store.checkAuthCode('flood@b.co', '123456', clk.now()), false,
+    'every guess in the burst counted toward the cap');
+});
+
+test('account deletion shares the sign-in guess budget', async () => {
+  const clk = clock('2026-08-20T12:00:00Z');
+  const srv = await makeServer({ now: clk.now });
+  const { token } = await signIn(srv, 'del@b.co');
+  const user = await userOf(srv, token);
+  const from = { headers: { 'x-forwarded-for': '8.8.8.8' }, socket: {} } as any;
+  let refusals = 0;
+  for (let i = 0; i < 40; i++) {
+    try { await srv.accountDelete(user, { confirm: 'DELETE', code: String(100000 + i) }, from); }
+    catch (e) { if (/too-many-requests/.test(String(e))) refusals++; }
+  }
+  assert.ok(refusals > 0, 'delete cannot be used as an unthrottled code oracle');
+  assert.ok(await srv.store.userByEmail('del@b.co'), 'and the account is still there');
+});
+
 test('streaks: consecutive days count, a gap resets, and the best run is remembered', () => {
   const s = streakStats(['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-22'], '2026-08-22');
   assert.equal(s.current, 1, 'today stands alone after the gap');
