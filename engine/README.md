@@ -1,4 +1,4 @@
-# @clues/engine
+# @beyond-doubt/engine
 
 A no-guess deduction engine. **Theme is a skin layer, and it always was.** English, Portuguese
 and Spanish are first-class, including gender and number agreement.
@@ -392,6 +392,11 @@ failing obscurely. `npm run verify` typechecks and runs the 82 unit tests, the f
 demo build and then e2e. The Postgres store is covered separately by `npm run test:pg`,
 which needs a running server.
 
+
+## Operating it
+
+Feature flags, the admin page, account requests, sign-in throttling and streak questions:
+see [`docs/ADMIN.md`](docs/ADMIN.md).
 
 ## Deploying
 

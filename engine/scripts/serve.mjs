@@ -42,7 +42,7 @@ if (prod) {
 }
 
 const http = srv.listen(port);
-console.log(`clues server on http://localhost:${port} (${prod ? 'production' : dev ? 'development' : 'non-dev'}, ${store ? 'postgres' : 'sqlite'})`);
+console.log(`beyond-doubt server on http://localhost:${port} (${prod ? 'production' : dev ? 'development' : 'non-dev'}, ${store ? 'postgres' : 'sqlite'})`);
 if (dev) console.log('  dev login: the six-digit code comes back in the sign-in response');
 else console.log('  sign-in: codes are emailed, and this script wires no sender — use --dev (npm run serve) locally');
 console.log(process.env.ADMIN_TOKEN

@@ -1,5 +1,5 @@
 {
-  "name": "@clues/engine",
+  "name": "@beyond-doubt/engine",
   "version": "0.1.0",
   "description": "Deterministic no-guess deduction engine. Theme is a skin layer; en/pt/es built in.",
   "type": "module",
@@ -25,7 +25,7 @@
     "esbuild": "^0.28.2",
     "typescript": "5.6"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "engines": {
     "node": ">=22.5"
   },
