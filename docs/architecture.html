@@ -327,7 +327,9 @@ It migrates on cold start, refuses to start without <code>DATABASE_URL</code> (o
 Resend. Dev mode — codes in the response, any CORS origin, a public seed key — is an explicit
 opt-in (<code>BD_DEV=1</code>, which <code>npm run serve</code> passes) and is refused under
 <code>NODE_ENV=production</code> and on Vercel production and preview deployments. <code>npm run test:pg</code>
-runs the whole server suite against Postgres, so both stores answer to the same tests.
+runs the whole server suite against Postgres, so both stores answer to the same tests; CI
+(<code>.github/workflows/ci.yml</code>) runs it on every push and pull request against a
+Postgres service container, alongside the unit tests, the fuzz and the browser e2e.
 Operator feature flags (<code>src/net/flags.ts</code>) are enforced server-side and sit
 behind their own <code>ADMIN_TOKEN</code>; unset, <code>/api/admin/*</code> does not exist.</p>
 
@@ -373,14 +375,14 @@ artwork carry it, so one build serves both URLs.</p>
     flags.ts — operator feature flags
   </div>
   <div class="card"><b>test · demo · api</b>
-    82 tests + a 294-board fuzz<br>
+    94 tests + a 294-board fuzz<br>
     demo/ — single-file game + how, tech, legal, account pages<br>
     api/ + vercel.json — serverless<br>
     src/base.ts — path prefix
   </div>
 </div>
 
-<p class="foot">Verification: 82 tests, a 294-board fuzz across every theme and difficulty
+<p class="foot">Verification: 94 tests, a 294-board fuzz across every theme and difficulty
 (11,982 clue renders), WCAG contrast assertions across 63 theme/mode combinations, and
 anti-cheat tests covering every claim in section 5. <code>npm run e2e</code> drives Chromium
 against a real server for what unit tests cannot see. Worst observed generate-and-solve: ~120ms.</p>

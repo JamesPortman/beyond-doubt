@@ -9,7 +9,7 @@ illustration function.
 
 ```
 npm install
-npm run verify      # types, 82 tests, 294-board fuzz, builds the demo, then e2e
+npm run verify      # types, 94 tests, 294-board fuzz, builds the demo, then e2e
 npm run serve       # http://localhost:8787  — accounts + ranked play, in dev mode (--dev)
 ```
 
@@ -388,9 +388,13 @@ and the deploy build has no business doing that. Install it where you run the ch
     npm i --no-save playwright && npx playwright install chromium
 
 — and `npm run e2e` picks it up. Without it the script says so and exits rather than
-failing obscurely. `npm run verify` typechecks and runs the 82 unit tests, the fuzz, the
+failing obscurely. `npm run verify` typechecks and runs the 94 unit tests, the fuzz, the
 demo build and then e2e. The Postgres store is covered separately by `npm run test:pg`,
 which needs a running server.
+
+CI (`.github/workflows/ci.yml`, every push and pull request) runs all of it in three jobs:
+unit tests, fuzz and the demo typecheck; `npm run test:pg` against a `postgres:16` service
+container; and e2e, installing Playwright's Chromium on the runner.
 
 
 ## Operating it
