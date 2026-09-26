@@ -585,6 +585,25 @@ test('dev mode is opt-in, and never on a deployment however it is asked for', as
   assert.equal(out['access-control-allow-origin'], undefined, 'no wildcard CORS by default');
 });
 
+test('an unexpected failure is logged, and the caller gets only the code', async () => {
+  const srv = await makeServer({ now: () => new Date('2026-08-20T12:00:00Z').getTime() });
+  srv.store.weekBoard = async () => { throw new Error('relation "results" does not exist at host db.internal'); };
+  let status = 0, body = '';
+  const res = {
+    setHeader() {}, writeHead(c: number) { status = c; return res; }, end(b?: string) { body = b ?? ''; },
+  } as any;
+  const logged: unknown[] = [];
+  const orig = console.error;
+  console.error = (...a: unknown[]) => { logged.push(a); };
+  try {
+    await srv.handler({ method: 'GET', url: '/api/week?weekId=2026-W34', headers: {} } as any, res);
+  } finally { console.error = orig; }
+  assert.equal(status, 500);
+  assert.deepEqual(JSON.parse(body), { error: 'server-error' });
+  assert.ok(!body.includes('db.internal'), 'no internal detail reaches the client');
+  assert.ok(logged.flat().some((x) => String(x).includes('db.internal')), 'but the operator sees it in the log');
+});
+
 test('health checks the things that actually break', async () => {
   const srv = await makeServer({ now: () => new Date('2026-08-20T12:00:00Z').getTime() });
   const h = await srv.health();

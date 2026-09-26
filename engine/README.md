@@ -210,6 +210,9 @@ Also enforced server-side: hints and mistakes are counted and persisted (a hinte
 flooding is rate limited, login codes are single-use, attempt-capped, expiring and compared in
 constant time, and tokens are stored only as hashes.
 
+An unexpected server error answers `500 { "error": "server-error" }` and nothing more; the
+underlying message (which can quote a mail provider or Postgres) goes to the server log.
+
 What is *not* solved here: two people at one screen, or someone photographing a friend's
 board. That is a social problem, not a cryptographic one, and every daily puzzle game has it.
 

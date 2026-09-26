@@ -235,4 +235,5 @@ export interface ExportResult {
 
 export interface DeleteResult { deleted: true; removed: Record<string, number>; }
 
-export interface ApiErrorBody { error: string; detail?: string; }
+/** Just the code. Unexpected errors are logged server-side and never described to the caller. */
+export interface ApiErrorBody { error: string; }

@@ -768,7 +768,11 @@ export class GameServer {
     } catch (e) {
       const err = e as HttpError;
       const code = err.status ?? 500;
-      json(res, code, { error: err.code ?? 'server-error', detail: code === 500 ? String(err.message) : undefined });
+      // An unexpected error's message is for the operator, not the caller: it can carry a
+      // mail provider's reply or a Postgres error naming tables and values. Log it here and
+      // answer with the bare code.
+      if (!(e instanceof HttpError)) console.error(`${req.method} ${url.pathname} failed:`, e);
+      json(res, code, { error: err.code ?? 'server-error' });
     }
   };
 
