@@ -330,6 +330,12 @@ opt-in (<code>BD_DEV=1</code>, which <code>npm run serve</code> passes) and is r
 runs the whole server suite against Postgres, so both stores answer to the same tests; CI
 (<code>.github/workflows/ci.yml</code>) runs it on every push and pull request against a
 Postgres service container, alongside the unit tests, the fuzz and the browser e2e.
+Production deploys only after all of them pass: Vercel's git deploys are disabled for
+<code>main</code> (they still build previews for pull requests), and a <code>deploy</code>
+job in the same workflow runs <code>vercel pull → build → deploy --prebuilt --prod</code>
+once the suites are green. The workflow runs with a read-only <code>GITHUB_TOKEN</code> and
+pins every action to a commit SHA rather than a movable tag; Dependabot checks the pins
+monthly and opens one grouped PR, which has to pass the same suites as any other change.
 Operator feature flags (<code>src/net/flags.ts</code>) are enforced server-side and sit
 behind their own <code>ADMIN_TOKEN</code>; unset, <code>/api/admin/*</code> does not exist.</p>
 

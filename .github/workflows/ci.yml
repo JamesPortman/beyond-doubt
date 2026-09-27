@@ -1,8 +1,20 @@
 name: CI
 
+# Every push and pull request runs the unit, fuzz, typecheck, Postgres and
+# browser suites. main deploys to production only after all of them pass:
+# Vercel's git auto-deploy is disabled for main (engine/vercel.json), so a red
+# suite blocks the deploy. Pull requests still get Vercel preview deployments.
 on:
   push:
   pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
 
 # Least privilege for GITHUB_TOKEN: nothing here writes to the repo.
 permissions:
@@ -77,3 +89,22 @@ jobs:
       - run: npm i --no-save playwright
       - run: npx playwright install --with-deps chromium
       - run: npm run e2e
+
+  deploy:
+    name: deploy to production
+    needs: [test, postgres, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Runs from the repository root: the Vercel project's Root Directory
+    # setting points the build at engine/.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - name: Pull production env
+        run: npx --yes vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: npx --yes vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy to production
+        run: npx --yes vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
