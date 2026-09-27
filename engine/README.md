@@ -422,6 +422,11 @@ where the *server* lives, and it comes down to one question: does the host give 
 so there is no second copy of the rules to keep in sync. It migrates on cold start and
 refuses to start without a database URL.
 
+Production deploys come from CI rather than Vercel's git integration, which
+`vercel.json` disables for `main`: the `deploy` job in `.github/workflows/ci.yml` runs only
+after the unit, fuzz, typecheck, Postgres and browser suites all pass. Pull requests still
+get Vercel preview deployments.
+
 Two properties of the architecture make this work at all, and both were designed in rather
 than patched on:
 
