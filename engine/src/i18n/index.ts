@@ -173,6 +173,8 @@ export interface UiStrings {
   theme: string; language: string; newGame: string; restart: string;
   splitClues: string; yourClues: string; playerN: string;
   perfect: string; solvedIn: string; weeklyTotal: string; complete: string;
+  /** a ranked run already under way was handed back rather than a clean board */
+  resumed: string;
   timePenalty: string;
   mistakeCost: string; adjustedTime: string;
   /** The refusal. {name} and {pred} are filled in; {pred} already agrees with the name. */

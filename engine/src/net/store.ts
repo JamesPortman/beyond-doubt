@@ -54,6 +54,9 @@ export interface Store {
   createPlay(p: NewPlay): Promise<PlayRow>;
   play(id: string): Promise<PlayRow | undefined>;
   updatePlay(id: string, patch: Partial<PlayRow>): Promise<void>;
+  /** The earliest-started ranked play this user has on this edition, finished or not.
+   *  That play, and only that play, can put a result on the board. */
+  firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined>;
   recordResult(r: ResultRow): Promise<'recorded' | 'already-ranked'>;
   resultFor(editionId: string, userId: string): Promise<ResultRow | undefined>;
   board(editionId: string, limit: number): Promise<(ResultRow & { display_name: string })[]>;
@@ -208,18 +211,22 @@ export class SqliteStore implements Store {
     this.db.prepare('INSERT INTO auth_codes (email,code_hash,expires_at) VALUES (?,?,?)')
       .run(email, sha(code), expiresAt);
   }
-  /** Constant-time compare, single-use, attempt-capped. */
+  /** Constant-time compare, single-use, attempt-capped. The attempt is counted and the
+   *  code read in one statement, and spending it is conditional on it being unused — the
+   *  same shape as the Postgres store, where requests really do race. */
   async checkAuthCode(email: string, code: string, now: number): Promise<boolean> {
     const row = this.db.prepare(
-      'SELECT rowid, code_hash, expires_at, attempts, used FROM auth_codes WHERE email = ? AND used = 0 ORDER BY rowid DESC LIMIT 1',
+      `UPDATE auth_codes SET attempts = attempts + 1
+        WHERE rowid = (SELECT rowid FROM auth_codes WHERE email = ? AND used = 0 ORDER BY rowid DESC LIMIT 1)
+          AND used = 0
+        RETURNING rowid, code_hash, expires_at, attempts`,
     ).get(email) as any;
     if (!row) return false;
-    this.db.prepare('UPDATE auth_codes SET attempts = attempts + 1 WHERE rowid = ?').run(row.rowid);
-    if (row.attempts >= 5 || row.expires_at < now) return false;
+    // attempts now includes this one: the first five are judged, the sixth is not
+    if (row.attempts > 5 || row.expires_at < now) return false;
     const a = Buffer.from(sha(code), 'hex'), b = Buffer.from(String(row.code_hash), 'hex');
     if (a.length !== b.length || !timingSafeEqual(a, b)) return false;
-    this.db.prepare('UPDATE auth_codes SET used = 1 WHERE rowid = ?').run(row.rowid);
-    return true;
+    return Number(this.db.prepare('UPDATE auth_codes SET used = 1 WHERE rowid = ? AND used = 0').run(row.rowid).changes) === 1;
   }
 
   async issueToken(userId: string, expiresAt: number): Promise<string> {
@@ -252,6 +259,11 @@ export class SqliteStore implements Store {
     const set = keys.map((k) => `${k} = ?`).join(', ');
     this.db.prepare(`UPDATE plays SET ${set} WHERE id = ?`)
       .run(...keys.map((k) => (patch as any)[k]), id);
+  }
+
+  async firstRankedPlay(userId: string, editionId: string): Promise<PlayRow | undefined> {
+    return this.db.prepare(`SELECT * FROM plays WHERE user_id = ? AND edition_id = ? AND ranked = 1
+      ORDER BY started_at ASC, id ASC LIMIT 1`).get(userId, editionId) as PlayRow | undefined;
   }
 
   /* ---------- results ---------- */

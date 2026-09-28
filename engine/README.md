@@ -1,4 +1,4 @@
-# @clues/engine
+# @beyond-doubt/engine
 
 A no-guess deduction engine. **Theme is a skin layer, and it always was.** English, Portuguese
 and Spanish are first-class, including gender and number agreement.
@@ -9,8 +9,8 @@ illustration function.
 
 ```
 npm install
-npm run verify      # types, 46 tests, 294-board fuzz, then builds the demo
-npm run serve       # http://localhost:8787  — accounts + ranked play
+npm run verify      # types, 94 tests, 294-board fuzz, builds the demo, then e2e
+npm run serve       # http://localhost:8787  — accounts + ranked play, in dev mode (--dev)
 ```
 
 `demo/dist/clues-demo.html` also runs standalone from the filesystem: it detects that no
@@ -38,16 +38,23 @@ src/core/     grid.ts      geometry as bitmasks — a whole board state is one 3
               generate.ts  builds a board WITH a proven forced solve path
               session.ts   play state, legality, hints, split-clue dealing
               scoring.ts   time / hints / mistakes / difficulty -> score
-              edition.ts   daily + weekly editions from the calendar
+              edition.ts   daily + weekly + archive editions from the calendar
+              streak.ts    current / best streak from played dates
+              share.ts     the shareable result
               leaderboard.ts  pluggable store (memory + browser-local included)
 src/i18n/     en.ts pt.ts es.ts — clue rendering per language, not string substitution
 src/themes/   seven themes as pure data + palette
-src/render/   art.ts — procedural tile illustration, one drawing function per theme
+src/render/   art.ts       procedural tile illustration, one drawing function per theme
+              deal.ts      seeded deal of a theme's real artwork
+              settings.ts  palette derivation;  skin.ts  theme -> CSS custom properties
 src/net/      protocol.ts  the wire format
-              server.ts    accounts, authoritative play, leaderboards (node:http + node:sqlite)
+              server.ts    accounts, authoritative play, leaderboards (node:http)
+              store.ts     SQLite (node:sqlite);  store-pg.ts  Postgres, same interface
+              flags.ts     operator feature flags, enforced server-side
               client.ts    typed browser client
-src/render/   theme -> CSS custom properties
-demo/         a playable single-file build of all of it
+src/base.ts   the /beyond-doubt path prefix, recovered at runtime
+api/          Vercel serverless entry point
+demo/         a playable single-file build of all of it, plus how, tech, legal and account pages
 ```
 
 ### Why the clue layer looks the way it does
@@ -68,8 +75,8 @@ Rendered:
 
 "Tree" is feminine in Portuguese (*a árvore*) and masculine in Spanish (*el árbol*), so the
 numeral, the article and the adjective all change. That gender belongs to the **theme**, not
-the engine — swap to The Wall (*o quadro* / *el cuadro*, both masculine) and the same clue
-renders `exatamente dois quadros são falsos`. Themes therefore declare gendered nouns and
+the engine — swap to The Guest List (*o convidado* / *el invitado*, both masculine) and the
+same clue renders `exatamente dois convidados são culpados`. Themes therefore declare gendered nouns and
 full four-slot predicate forms, and nothing anywhere concatenates an adjective onto an
 unknown noun. Person names carry their own gender too, because *Nadia é culpada* and
 *Owen é culpado* are different words.
@@ -96,10 +103,13 @@ Themes are chosen from a dropdown in the header and in Settings.
 ### The archive, and why late results are flagged
 
 Every daily since launch is playable from a calendar grid, showing which you have finished,
-your score, and each day's difficulty. Boards are pure functions of their date, so the archive
-serves the board that *actually ran* — not a regenerated approximation.
+your score, and each day's difficulty. A board is a pure function of its seed, and the server
+derives each day's seed the same way every time, so the archive serves the board that
+*actually ran* — not a regenerated approximation.
 
-An archived run **is** ranked on that day's own leaderboard (first attempt only). It is
+An archived run **is** ranked on that day's own leaderboard (first attempt only) — for days from
+2026-09-25 on. Boards before that were seeded from the date alone, so anyone with the code can
+rebuild them; replays of those days are practice, and the leaderboard from the day stands. It is
 recorded with `late = 1`, which excludes it from two things:
 
 - **Streaks.** Otherwise you could back-fill a fortnight and manufacture a 14-day streak.
@@ -114,8 +124,9 @@ talking to each other. `Session.cluesFor(player)` is the whole implementation.
 
 ## Scoring and leaderboards
 
-`scoreRun()` weighs time against par for the difficulty, multiplies by difficulty, and deducts
-flat penalties for hints and mistakes, so a clean Sunday outranks a fast Monday. Speed is
+`scoreRun()` weighs time against par for the difficulty, multiplies by difficulty, deducts a
+flat penalty per hint, and adds a minute to the clock per mistake, so a clean Sunday outranks
+a fast Monday. Speed is
 capped so an implausible solve cannot run away with the board.
 
 `scoreRun()` is shared by both paths, but online it is only ever called on the server, from
@@ -177,13 +188,30 @@ The server re-checks every move anyway. You get zero-latency play and full autho
 `free` — never a seed or a date. You cannot request tomorrow's board, drop back to Monday's
 easier one, or hand-pick a seed you already solved.
 
-**The first completed attempt is the ranked one.** Replaying a board you have solved is
-practice; it cannot improve your placement. Free play is never ranked at all.
+**Nor can you compute tomorrow's board.** A ranked board dated 2026-09-25 or later is seeded
+with an HMAC of its date and theme under `EDITION_SECRET`, which only the server holds. Before
+that, the seed *was* the date and theme, so with the code in hand anyone could build tomorrow's
+board tonight and solve it offline with the engine's own solver. Production refuses to start a
+ranked board without the secret rather than fall back. The browser builds only practice boards —
+split play and the offline fallback included — because a board built in the page carries its
+whole solution.
+
+**The first attempt *started* is the ranked one.** Not the first finished: otherwise you
+could open the board, make your mistakes, walk away and start a clean run knowing the answer.
+So starting a ranked board you are part-way through *resumes* that play — its moves, its
+mistakes, its hints and its clock, which kept running while you were away — whether you
+reloaded, switched device or joined a room. (`start` returns it with a `resume` block; the
+client replays the moves.) Replaying a board you have finished is practice and cannot
+improve your placement, and if two starts ever race, only the earlier play can record a
+result. Free play is never ranked at all.
 
 Also enforced server-side: hints and mistakes are counted and persisted (a hinted run is not
 "perfect"), moves on someone else's play are rejected, out-of-range cells are rejected, move
 flooding is rate limited, login codes are single-use, attempt-capped, expiring and compared in
 constant time, and tokens are stored only as hashes.
+
+An unexpected server error answers `500 { "error": "server-error" }` and nothing more; the
+underlying message (which can quote a mail provider or Postgres) goes to the server log.
 
 What is *not* solved here: two people at one screen, or someone photographing a friend's
 board. That is a social problem, not a cryptographic one, and every daily puzzle game has it.
@@ -191,13 +219,23 @@ board. That is a social problem, not a cryptographic one, and every daily puzzle
 ### Auth
 
 Passwordless six-digit code by email. In dev the code comes back in the response body so you
-can sign in without an email provider; in production `authRequest` should send it and return
-`{ sent: true }` alone. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
+can sign in without an email provider; otherwise `authRequest` hands it to the
+`sendEmail` option (Resend, in `api/index.ts`) and returns `{ sent: true }` alone, and with no
+`sendEmail` at all the request fails rather than claim a code was sent.
+
+Dev mode is **opt-in**: `GameServer` defaults to production behaviour, and the entry points
+turn dev on only through `devModeFromEnv()` — `BD_DEV=1` (which `npm run serve` passes as
+`--dev`), and never alongside `NODE_ENV=production` or on a Vercel production or preview
+deployment. Dev also allows any CORS origin and keys ranked seeds with a public placeholder,
+so a deployment that fell into it would hand out sign-in codes and buildable boards; a missing
+variable must not be what turns it on. Swapping in OAuth or passkeys touches only `authRequest`/`authVerify`.
 
 ### Storage
 
-`node:sqlite` — one file, zero operations. Every query is plain SQL in `store.ts`; moving to
-Postgres is a driver swap. Requires Node 22.5+.
+`node:sqlite` — one file, zero operations. Every query is plain SQL in `store.ts`. Requires
+Node 22.5+. `PostgresStore` in `store-pg.ts` implements the same `Store` interface and is used
+whenever `DATABASE_URL` (or `POSTGRES_URL`) is set; `npm run test:pg` runs the whole server
+suite against it.
 
 
 ## Tile artwork
@@ -206,7 +244,7 @@ Every tile is illustrated, and every illustration is *drawn* rather than fetched
 `src/render/art.ts` emits inline SVG seeded from the board's label seed. Six drawing
 functions cover the seven themes: portraits (in colour for The Guest List, as a
 high-contrast photocopy for The Callboard), orchard trees with three growth habits,
-framed paintings mixed from a ten-pigment box, personnel dossiers, star fields, and
+framed paintings mixed from a twelve-pigment box, personnel dossiers, star fields, and
 storyboard frames.
 
 Doing it this way buys four things that an asset pipeline would not:
@@ -217,11 +255,13 @@ Doing it this way buys four things that an asset pipeline would not:
   tree loses its fruit and gains lesions, a forged canvas cracks, a flagged file gets
   stamped. The picture *is* the feedback.
 - **Theming.** Drawings read the theme palette, so a new skin needs no new assets.
-- **Size.** The entire illustrated demo, seven themes and three languages included, is one
-  132 KB HTML file with no network requests.
+- **Size.** The entire illustrated game, seven themes and three languages included, is one
+  self-contained ~260 KB HTML file.
 
-If you later commission real illustration, `tileArt()` is the single seam — return an
-`<img>` and nothing else in the codebase changes. Tests assert the art is deterministic,
+Real artwork plugs in through a theme's `images` set, and Auction Night uses it: 21
+paintings and photographs in `demo/assets/gallery/`, dealt from the label seed and marked
+with a red dot when sold. They load at runtime, so the single-file build, which has no
+assets beside it, falls back to the drawn tile. `tileArt()` remains the single seam. Tests assert the art is deterministic,
 well-formed, varied within a board, different across boards, and visibly state-dependent.
 
 The grid is square: tiles are 1:1 with the drawing edge to edge and a caption bar across
@@ -323,9 +363,15 @@ Two details that are easy to get wrong and hard to notice:
 
 `Store.hitRateLimit(key, windowMs, now)` records an attempt and returns how many happened
 in the window. The server keys on both the IP and the address, because each alone is
-trivially varied. It is deliberately approximate — two racing requests can both squeak
+trivially varied. Account deletion checks an emailed code too, so it draws on the same
+per-IP and per-address budget as code entry rather than offering a second door. It is deliberately approximate — two racing requests can both squeak
 through, which for a speed bump on a sign-in form is a fair trade against locking a table on
 every hit.
+
+The code itself is not approximate. Each check counts the attempt and reads the code in one
+`UPDATE … RETURNING`, so a burst of guesses cannot all read "no attempts yet"; only the first
+five attempts on a code are judged; and spending it is conditional on it still being unused,
+so two correct submissions racing sign in once.
 
 ## End-to-end checks
 
@@ -342,8 +388,19 @@ and the deploy build has no business doing that. Install it where you run the ch
     npm i --no-save playwright && npx playwright install chromium
 
 — and `npm run e2e` picks it up. Without it the script says so and exits rather than
-failing obscurely. `npm run verify` runs tests, fuzz and e2e.
+failing obscurely. `npm run verify` typechecks and runs the 94 unit tests, the fuzz, the
+demo build and then e2e. The Postgres store is covered separately by `npm run test:pg`,
+which needs a running server.
 
+CI (`.github/workflows/ci.yml`, every push and pull request) runs all of it in three jobs:
+unit tests, fuzz and the demo typecheck; `npm run test:pg` against a `postgres:16` service
+container; and e2e, installing Playwright's Chromium on the runner.
+
+
+## Operating it
+
+Feature flags, the admin page, account requests, sign-in throttling and streak questions:
+see [`docs/ADMIN.md`](docs/ADMIN.md).
 
 ## Deploying
 
@@ -355,32 +412,55 @@ where the *server* lives, and it comes down to one question: does the host give 
 | Host | What you change | Why |
 |---|---|---|
 | **Fly.io / Railway / Render** | nothing | a real Node process with a mounted volume — `npm run serve` is the whole deployment |
-| **Vercel** | swap SQLite for hosted Postgres | serverless functions have no persistent disk and no memory between requests |
+| **Vercel** | set `DATABASE_URL` to a hosted Postgres | serverless functions have no persistent disk and no memory between requests |
 | **Static only (no server)** | nothing | the demo already falls back to local play when no server answers |
 
 ### Vercel specifically
 
 `vercel.json` and `api/index.ts` are in the repo. One serverless function handles every
-`/api/*` route by reusing the same `GameServer` as local development, so there is no second
-copy of the rules to keep in sync.
+`/api/*` route by reusing the same `GameServer` as local development over `PostgresStore`,
+so there is no second copy of the rules to keep in sync. It migrates on cold start and
+refuses to start without a database URL.
+
+That migration is the first query a cold instance makes, so it is the one that meets a
+suspended Neon database waking up — which can reset the connection. It used to run once,
+unretried, and the first request after every quiet spell failed (`read ECONNRESET`). Now
+`src/net/transient.ts` retries it through a reset and never keeps a failed attempt, and the
+pool has an `error` listener, because Neon also drops idle clients and an unheard `error`
+event ends the process. Ordinary queries are *not* retried: a reset can arrive after a write
+has committed, and running it again would record the same play twice.
+
+Production deploys come from CI rather than Vercel's git integration, which
+`vercel.json` disables for every branch: the `deploy` job in `.github/workflows/ci.yml` runs
+only after the unit, fuzz, typecheck, Postgres and browser suites all pass.
+
+Pull requests get no Vercel preview, deliberately. Preview and Production share one database
+URL, so a preview could run an unmerged branch's cold-start migration against the live game's
+data; and from 28 September 2026 previews failed at "Resource provisioning" before any build
+started. The same suites run on every pull request against their own Postgres, which is the
+gate that matters. To look at a branch, run it locally with `npm run serve`.
 
 Two properties of the architecture make this work at all, and both were designed in rather
 than patched on:
 
 - **Every cache is rebuildable.** Puzzles regenerate from their seed. Play state replays from
   the moves the server already validated. So a request landing on a cold instance that has
-  never seen your board is indistinguishable from one that has.
+  never seen your board is indistinguishable from one that has. The reverse matters as much:
+  a warm instance's cached play is used only while its move, mistake and hint counts match
+  the database row, so a cache that missed a move handled elsewhere is rebuilt rather than
+  written back over it.
 - **Rate limiting reads the database**, not a `Map`. That was a real change made for this —
   an in-process counter is worthless when the next request may hit a different process.
 
 ### Served under a path prefix
 
 The Vercel deployment answers on two URLs: its own domain at the root, and
-`www.portman.ca/beyond-doubt/`, which proxies it as a subpath. `defaultApiBase()` in
-`src/net/client.ts` recovers the prefix from `location.pathname` and prepends it to the
-API origin, so one build serves both with no environment flag. The demo pages already
-link to each other relatively, so nothing else needed changing; keep it that way when
-adding a page. `test/client-base.test.ts` pins the prefix rules, including that a path
+`www.portman.ca/beyond-doubt/`, which proxies it as a subpath. `src/base.ts` recovers the
+prefix from `location.pathname`; `defaultApiBase()` in `src/net/client.ts` prepends it to
+the API origin, and Auction Night's artwork URLs carry it too, so one build serves both with
+no environment flag. Anything else the browser fetches by a site-root path needs the same
+treatment. The demo pages link to each other relatively; keep it that way when adding a
+page. `test/client-base.test.ts` pins the prefix rules, including that a path
 merely *starting* with the same letters is a different app.
 
 What you still have to do:
@@ -388,25 +468,27 @@ What you still have to do:
 1. **Provision Postgres** (Vercel Postgres, Neon, Supabase — any of them). SQLite on Vercel
    writes to `/tmp`, which is per-instance and wiped without warning. It will *appear* to
    work in testing and lose accounts in production.
-2. **Write `PostgresStore`.** `src/net/store.ts` is ~20 methods of plain SQL behind one
-   class; nothing above it knows what database it is talking to. The translation is
-   mechanical: `INTEGER PRIMARY KEY` → `bigserial`, `?` → `$1`, `ON CONFLICT … DO UPDATE`
-   is already Postgres-compatible syntax, and `DatabaseSync`'s synchronous `.get/.all/.run`
-   become awaited calls, which makes `Store`'s methods async. **This is the one piece not
-   written yet** — the SQLite implementation is the reference.
-3. **Set the secrets:** `DATABASE_URL`, and `NODE_ENV=production` so login codes stop coming
-   back in the response body.
-4. **Send real email.** `authRequest` currently returns the six-digit code to the caller,
-   which is correct for development and unacceptable in production. Swap in Resend, Postmark
-   or SES — it is a four-line change in one method.
-5. **Watch the cold-start cost.** Generating a 4x5 board is ~70ms and replaying twenty moves
+2. **Set the secrets:** `DATABASE_URL` and `EDITION_SECRET` (a long random string that keys
+   ranked seeds — keep it stable, since changing it changes every ranked board from
+   `SECRET_SEEDS_FROM` on). The function refuses to start without either. Vercel sets
+   `NODE_ENV=production` itself; never set `BD_DEV` there (it is ignored anyway).
+   `ALLOWED_ORIGINS` (only needed for cross-origin callers — the game calls its own origin),
+   `ADMIN_TOKEN` (unset, `/api/admin/*` does not exist) and `LAUNCH_DATE` are optional.
+3. **Send real email.** `api/index.ts` delivers codes through Resend and needs
+   `RESEND_API_KEY` (and `MAIL_FROM` for a verified sender). Without it a sign-in request
+   fails loudly rather than leaving the player waiting for a code that is not coming.
+4. **Watch the cold-start cost.** Generating a 4x5 board is ~70ms and replaying twenty moves
    costs a few deductions, so a cold request can run ~300ms. Caching the daily boards in the
    database at midnight would remove it if that ever matters.
 
 ### If you would rather not do any of that
 
 Deploy to Fly or Railway with a small volume mounted at `/data` and set
-`DB=/data/clues.db`. `npm run serve` is then the entire deployment, SQLite and all, and the
-Postgres work above disappears. For a daily puzzle game with a leaderboard this is very
-likely the right call — one process and one file will carry you a long way, and the code is
-already written.
+`DB=/data/clues.db`, and `npm run serve` runs the whole game on SQLite, one process and one
+file. Two things stand between that and production as `scripts/serve.mjs` is written today:
+with `NODE_ENV=production` it refuses to start without `DATABASE_URL`, `ALLOWED_ORIGINS` and
+`EDITION_SECRET`, and it passes no `sendEmail`, so sign-in requests would fail. Run it as
+`node scripts/serve.mjs` after a build rather than `npm run serve`, which adds `--dev`
+(ignored under `NODE_ENV=production`, but there is no reason to pass it). Both are small changes to
+that script — copy the Resend sender from `api/index.ts` — and for a daily puzzle game with
+a leaderboard one process and one file will still carry you a long way.

@@ -1,0 +1,111 @@
+name: CI
+
+# Every push and pull request runs the unit, fuzz, typecheck, Postgres and
+# browser suites. main deploys to production only after all of them pass:
+# Vercel's git deploys are disabled for every branch (engine/vercel.json), so a
+# red suite blocks the deploy. Pull requests get no Vercel preview: these suites
+# are their gate, against their own Postgres rather than production's database.
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+
+# Least privilege for GITHUB_TOKEN: nothing here writes to the repo.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: unit, fuzz, typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run fuzz
+      - run: npm run typecheck:demo
+
+  postgres:
+    name: server suite on Postgres
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: devpw
+          POSTGRES_DB: clues
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      # test:pg points CLUES_PG at $DATABASE_URL, defaulting to exactly this service
+      - run: npm run test:pg
+        env:
+          DATABASE_URL: postgres://postgres:devpw@127.0.0.1:5432/clues
+
+  e2e:
+    name: browser end-to-end
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: engine
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: engine/package-lock.json
+      - run: npm ci
+      # deliberately not in package.json — see "End-to-end checks" in engine/README.md
+      - run: npm i --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: npm run e2e
+
+  deploy:
+    name: deploy to production
+    needs: [test, postgres, e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    # Runs from the repository root: the Vercel project's Root Directory
+    # setting points the build at engine/.
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - name: Pull production env
+        run: npx --yes vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Build
+        run: npx --yes vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+      - name: Deploy to production
+        run: npx --yes vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

@@ -191,6 +191,7 @@ export const pt: Locale = {
     splitClues: 'Pistas divididas', yourClues: 'Suas pistas', playerN: 'Jogador',
     perfect: 'Perfeito — sem dicas, sem erros', solvedIn: 'Resolvido em', weeklyTotal: 'Total da semana',
     complete: 'Completo',
+    resumed: 'Retomando sua partida de onde parou — o relógio continuou correndo',
     shareCopy: 'Copiar resultado',
     shareSend: 'Compartilhar',
     shareImage: 'Salvar imagem',

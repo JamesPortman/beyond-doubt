@@ -48,6 +48,19 @@ export interface StartResult {
   /** free play only — a shareable seed. Never sent for ranked boards, because the seed
    *  regenerates the solution and a ranked board must stay unforgeable. */
   shareSeed?: string;
+  /** Set when this is a ranked attempt already under way. A ranked board is ranked on the
+   *  FIRST play started, so starting it again resumes that play — its moves, mistakes,
+   *  hints and clock — rather than dealing a clean one. `view.clues` already carries every
+   *  clue those moves unlocked; the client replays `moves` onto its own session. */
+  resume?: ResumeState;
+}
+
+export interface ResumeState {
+  moves: { c: number; s: State }[];
+  mistakes: number;
+  hintsUsed: number;
+  /** server time since the play started — the clock did not stop while you were away */
+  elapsedMs: number;
 }
 
 export interface MoveBody { playId: string; cell: number; state: State; }
@@ -124,6 +137,8 @@ export interface RoomJoinResult {
   serverNow: number;
   hintBudget: number;
   players: RoomPlayer[];
+  /** as StartResult.resume: joining a room mid-way through your ranked attempt continues it */
+  resume?: ResumeState;
 }
 
 export interface RoomHeartbeatBody {
@@ -220,4 +235,5 @@ export interface ExportResult {
 
 export interface DeleteResult { deleted: true; removed: Record<string, number>; }
 
-export interface ApiErrorBody { error: string; detail?: string; }
+/** Just the code. Unexpected errors are logged server-side and never described to the caller. */
+export interface ApiErrorBody { error: string; }

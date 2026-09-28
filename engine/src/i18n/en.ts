@@ -178,6 +178,7 @@ export const en: Locale = {
     splitClues: 'Split clues', yourClues: 'Your clues', playerN: 'Player',
     perfect: 'Perfect — no hints, no mistakes', solvedIn: 'Solved in', weeklyTotal: 'Weekly total',
     complete: 'Complete',
+    resumed: 'Picking up your run where you left it — the clock kept going',
     shareCopy: 'Copy result',
     shareSend: 'Share',
     shareImage: 'Save image',
