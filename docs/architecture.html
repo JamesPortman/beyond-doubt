@@ -322,7 +322,8 @@ and hint counts match the database row), and <b>rate limiting reads the database
 <code>demo/dist</code> and rewrites every <code>/api/*</code> route to one function,
 <code>api/index.ts</code>, which runs the same <code>GameServer</code> as
 <code>npm run serve</code> over <code>PostgresStore</code> (<code>src/net/store-pg.ts</code>).
-It migrates on cold start, refuses to start without <code>DATABASE_URL</code> (or
+It migrates on cold start — retrying a connection reset while a suspended Neon database
+wakes, and never keeping a failed attempt (<code>src/net/transient.ts</code>) — refuses to start without <code>DATABASE_URL</code> (or
 <code>POSTGRES_URL</code>) or <code>EDITION_SECRET</code>, and delivers sign-in codes through
 Resend. Dev mode — codes in the response, any CORS origin, a public seed key — is an explicit
 opt-in (<code>BD_DEV=1</code>, which <code>npm run serve</code> passes) and is refused under

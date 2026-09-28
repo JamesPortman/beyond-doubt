@@ -422,6 +422,14 @@ where the *server* lives, and it comes down to one question: does the host give 
 so there is no second copy of the rules to keep in sync. It migrates on cold start and
 refuses to start without a database URL.
 
+That migration is the first query a cold instance makes, so it is the one that meets a
+suspended Neon database waking up — which can reset the connection. It used to run once,
+unretried, and the first request after every quiet spell failed (`read ECONNRESET`). Now
+`src/net/transient.ts` retries it through a reset and never keeps a failed attempt, and the
+pool has an `error` listener, because Neon also drops idle clients and an unheard `error`
+event ends the process. Ordinary queries are *not* retried: a reset can arrive after a write
+has committed, and running it again would record the same play twice.
+
 Production deploys come from CI rather than Vercel's git integration, which
 `vercel.json` disables for `main`: the `deploy` job in `.github/workflows/ci.yml` runs only
 after the unit, fuzz, typecheck, Postgres and browser suites all pass. Pull requests still

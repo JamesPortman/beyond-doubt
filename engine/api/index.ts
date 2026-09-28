@@ -5,6 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
 import { GameServer, devModeFromEnv } from '../src/net/server.js';
 import { PostgresStore } from '../src/net/store-pg.js';
+import { onceSucceeded, retryTransient } from '../src/net/transient.js';
 
 const CONNECTION = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
 
@@ -27,8 +28,20 @@ if (!DEV && !process.env.EDITION_SECRET) {
 // One pool per warm instance; `max: 2` because a serverless platform runs many of them
 // and a hosted Postgres has a connection ceiling. Use a pooler (pgBouncer/Neon) in front.
 const pool = new Pool({ connectionString: CONNECTION, max: 2 });
+// When the database closes an idle client — Neon does, when it suspends — pg emits 'error'
+// on the pool, and an 'error' event with no listener ends the process. The client is
+// already gone from the pool; the next query simply opens a fresh connection.
+pool.on('error', (e) => console.warn('pg: idle client dropped:', (e as { code?: string }).code ?? e.message));
 const store = new PostgresStore(pool);
-const migrated = store.migrate();
+
+// The schema check every cold start makes. It used to run once with no retry, and the first
+// connection to a database waking from suspend can be reset — so the first request after a
+// quiet spell failed. Now a transient reset is retried, and a failure is not kept: the next
+// request tries again instead of the instance staying broken.
+const migrated = onceSucceeded(() => retryTransient(() => store.migrate()));
+// Start at cold start rather than on the first request, but with a handler attached: a
+// rejection nobody is awaiting yet is an unhandled rejection, and Node ends the process.
+migrated().catch(() => { /* surfaced by the request that awaits it */ });
 
 /** Login codes by email. Deliberately throws rather than resolving quietly: a sign-in code
  *  that was never sent must surface as a failed request, not as a player waiting forever for
@@ -70,6 +83,6 @@ const server = new GameServer({
 });
 
 export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  await migrated;
+  await migrated();
   await server.handler(req, res);
 }
