@@ -431,9 +431,14 @@ event ends the process. Ordinary queries are *not* retried: a reset can arrive a
 has committed, and running it again would record the same play twice.
 
 Production deploys come from CI rather than Vercel's git integration, which
-`vercel.json` disables for `main`: the `deploy` job in `.github/workflows/ci.yml` runs only
-after the unit, fuzz, typecheck, Postgres and browser suites all pass. Pull requests still
-get Vercel preview deployments.
+`vercel.json` disables for every branch: the `deploy` job in `.github/workflows/ci.yml` runs
+only after the unit, fuzz, typecheck, Postgres and browser suites all pass.
+
+Pull requests get no Vercel preview, deliberately. Preview and Production share one database
+URL, so a preview could run an unmerged branch's cold-start migration against the live game's
+data; and from 28 September 2026 previews failed at "Resource provisioning" before any build
+started. The same suites run on every pull request against their own Postgres, which is the
+gate that matters. To look at a branch, run it locally with `npm run serve`.
 
 Two properties of the architecture make this work at all, and both were designed in rather
 than patched on:
