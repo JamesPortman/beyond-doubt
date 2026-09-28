@@ -2,8 +2,9 @@ name: CI
 
 # Every push and pull request runs the unit, fuzz, typecheck, Postgres and
 # browser suites. main deploys to production only after all of them pass:
-# Vercel's git auto-deploy is disabled for main (engine/vercel.json), so a red
-# suite blocks the deploy. Pull requests still get Vercel preview deployments.
+# Vercel's git deploys are disabled for every branch (engine/vercel.json), so a
+# red suite blocks the deploy. Pull requests get no Vercel preview: these suites
+# are their gate, against their own Postgres rather than production's database.
 on:
   push:
   pull_request:

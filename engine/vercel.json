@@ -1,5 +1,5 @@
 {
-  "git": { "deploymentEnabled": { "main": false } },
+  "git": { "deploymentEnabled": false },
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "npm run build && npm run demo",
   "outputDirectory": "demo/dist",
